@@ -1,0 +1,42 @@
+apiVersion: flwr.exalsius.ai/v1
+kind: Federation
+metadata:
+  name: federation-daemonset-subprocess
+spec:
+  # DaemonSet mode: one pod per matching node
+  mode: DaemonSet
+  # subprocess: SuperLink/SuperNode launch SuperExec internally
+  isolationMode: subprocess
+
+  superlink:
+    image: flwr/superlink:1.25.0
+    # Resource configuration for SuperLink container
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+    service:
+      type: ClusterIP
+
+  supernodes:
+    image: flwr/supernode:1.25.0
+    pools:
+      - name: default
+        images: {}
+        # Resource configuration for SuperNode container
+        supernodeResources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        # In DaemonSet mode, replicas must NOT be set
+        # Target specific nodes with nodeSelector:
+        # podTemplate:
+        #   spec:
+        #     nodeSelector:
+        #       flower.dev/role: client

@@ -1,0 +1,4 @@
+## Example manifests have moved to examples/ directory
+## Use: kubectl apply -k ../../examples/ or kubectl apply -f ../../examples/<file>.yaml
+resources: []
+# +kubebuilder:scaffold:manifestskustomizesamples

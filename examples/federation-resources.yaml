@@ -1,0 +1,149 @@
+apiVersion: flwr.exalsius.ai/v1
+kind: Federation
+metadata:
+  name: federation-resources
+spec:
+  # StatefulSet mode with process isolation
+  # This example demonstrates comprehensive resource configuration
+  mode: StatefulSet
+  isolationMode: process
+
+  superlink:
+    image: flwr/superlink:1.25.0
+    # Required in process mode: ServerApp sidecar image
+    superexecImage: flwr/superexec:1.25.0
+    # Resource configuration for SuperLink container
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+    # Resource configuration for SuperExec ServerApp sidecar (process mode only)
+    superexecResources:
+      requests:
+        memory: "128Mi"
+        cpu: "50m"
+      limits:
+        memory: "256Mi"
+        cpu: "200m"
+    service:
+      type: ClusterIP
+
+  supernodes:
+    image: flwr/supernode:1.25.0
+    pools:
+      # CPU-focused pool with moderate resources
+      - name: cpu-pool
+        replicas: 3
+        images:
+          # Required in process mode: ClientApp sidecar image
+          superexecClientApp: flwr/superexec:1.25.0
+        supernodeResources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "2000m"
+            memory: "1Gi"
+        superexecResources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "1000m"
+            memory: "512Mi"
+
+      # Memory-focused pool with higher memory allocation
+      - name: memory-pool
+        replicas: 2
+        images:
+          superexecClientApp: flwr/superexec:1.25.0
+        supernodeResources:
+          requests:
+            cpu: "200m"
+            memory: "2Gi"
+          limits:
+            cpu: "1000m"
+            memory: "4Gi"
+        superexecResources:
+          requests:
+            cpu: "100m"
+            memory: "512Mi"
+          limits:
+            cpu: "500m"
+            memory: "1Gi"
+
+      # GPU pool with higher CPU/memory for GPU workloads
+      - name: gpu-pool
+        replicas: 2
+        images:
+          superexecClientApp: flwr/superexec:1.25.0
+        supernodeResources:
+          requests:
+            cpu: "1000m"
+            memory: "2Gi"
+          limits:
+            cpu: "4000m"
+            memory: "8Gi"
+        superexecResources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "2000m"
+            memory: "4Gi"
+        gpu:
+          enabled: true
+          vendor: nvidia
+          resourceName: nvidia.com/gpu
+          count: 1
+        podTemplate:
+          spec:
+            nodeSelector:
+              accelerator: nvidia
+
+---
+# Alternative example: DaemonSet mode with subprocess isolation
+apiVersion: flwr.exalsius.ai/v1
+kind: Federation
+metadata:
+  name: federation-resources-daemonset
+spec:
+  mode: DaemonSet
+  isolationMode: subprocess
+
+  superlink:
+    image: flwr/superlink:1.25.0
+    # Resource configuration for SuperLink container
+    # Note: No superexecResources in subprocess mode
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+    service:
+      type: ClusterIP
+
+  supernodes:
+    image: flwr/supernode:1.25.0
+    pools:
+      - name: default
+        images: {}
+        # Resource configuration for SuperNode container
+        # Note: No superexecResources in subprocess mode
+        supernodeResources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        # Target specific nodes:
+        # podTemplate:
+        #   spec:
+        #     nodeSelector:
+        #       flower.dev/role: client

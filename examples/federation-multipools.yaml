@@ -1,0 +1,58 @@
+apiVersion: flwr.exalsius.ai/v1
+kind: Federation
+metadata:
+  name: federation-multipools
+spec:
+  # DaemonSet mode with multiple pools
+  mode: DaemonSet
+  isolationMode: subprocess
+
+  superlink:
+    image: flwr/superlink:1.25.0
+    # Resource configuration for SuperLink container
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+    service:
+      type: ClusterIP
+
+  supernodes:
+    # Default image used when pool doesn't specify one
+    image: flwr/supernode:1.25.0
+    pools:
+      - name: pool-a
+        images: {}
+        # Different pools can have different resource requirements
+        supernodeResources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "2000m"
+            memory: "1Gi"
+        # Target pool-a to specific nodes:
+        # podTemplate:
+        #   spec:
+        #     nodeSelector:
+        #       flower.dev/pool: a
+
+      - name: pool-b
+        images:
+          # Override default image for this pool (different version to test override)
+          supernode: flwr/supernode:1.24.0
+        # Different resource requirements for pool-b
+        supernodeResources:
+          requests:
+            cpu: "200m"
+            memory: "2Gi"
+          limits:
+            cpu: "1000m"
+            memory: "4Gi"
+        # podTemplate:
+        #   spec:
+        #     nodeSelector:
+        #       flower.dev/pool: b

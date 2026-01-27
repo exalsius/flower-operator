@@ -1,0 +1,38 @@
+apiVersion: flwr.exalsius.ai/v1
+kind: Federation
+metadata:
+  name: federation-statefulset-subprocess
+spec:
+  # StatefulSet mode: fixed number of replicas per pool
+  mode: StatefulSet
+  # subprocess: SuperLink/SuperNode launch SuperExec internally
+  isolationMode: subprocess
+
+  superlink:
+    image: flwr/superlink:1.25.0
+    # Resource configuration for SuperLink container
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+    service:
+      type: ClusterIP
+
+  supernodes:
+    image: flwr/supernode:1.25.0
+    pools:
+      - name: default
+        # Required in StatefulSet mode
+        replicas: 2
+        images: {}
+        # Resource configuration for SuperNode container
+        supernodeResources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"

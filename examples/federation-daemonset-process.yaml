@@ -1,0 +1,56 @@
+apiVersion: flwr.exalsius.ai/v1
+kind: Federation
+metadata:
+  name: federation-daemonset-process
+spec:
+  # DaemonSet mode: one pod per matching node
+  mode: DaemonSet
+  # process: operator deploys SuperExec externally as sidecars
+  isolationMode: process
+
+  superlink:
+    image: flwr/superlink:1.25.0
+    # Required in process mode: ServerApp sidecar image
+    superexecImage: flwr/superexec:1.25.0
+    # Resource configuration for SuperLink container
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+    # Resource configuration for SuperExec ServerApp sidecar (process mode only)
+    superexecResources:
+      requests:
+        memory: "128Mi"
+        cpu: "50m"
+      limits:
+        memory: "256Mi"
+        cpu: "200m"
+    service:
+      type: ClusterIP
+
+  supernodes:
+    image: flwr/supernode:1.25.0
+    pools:
+      - name: default
+        images:
+          # Required in process mode: ClientApp sidecar image
+          superexecClientApp: flwr/superexec:1.25.0
+        # Resource configuration for SuperNode container
+        supernodeResources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        # Resource configuration for SuperExec ClientApp sidecar (process mode only)
+        superexecResources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"

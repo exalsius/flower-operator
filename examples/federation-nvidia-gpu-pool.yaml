@@ -1,0 +1,29 @@
+apiVersion: flwr.exalsius.ai/v1
+kind: Federation
+metadata:
+  name: federation-nvidia
+spec:
+  # DaemonSet mode: one pod per matching node
+  mode: DaemonSet
+  # process: operator deploys SuperExec externally as sidecars
+  isolationMode: process
+
+  superlink:
+    image: flwr/superlink:1.25.0
+    # Required in process mode: ServerApp sidecar image
+    superexecImage: srnbckr/flwr-pytorch-quickstart
+    service:
+      type: ClusterIP
+
+  supernodes:
+    image: flwr/supernode:1.25.0
+    pools:
+      - name: nvidia-gpu
+        images:
+          # Required in process mode: ClientApp sidecar image that contains the dependencies needed for the Flower Client App
+          superexecClientApp: srnbckr/flwr-pytorch-quickstart
+        gpu:
+          enabled: true
+          vendor: nvidia
+          resourceName: nvidia.com/gpu
+          mountAll: true # use all available GPUs on the nodes
