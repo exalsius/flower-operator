@@ -34,6 +34,13 @@ import (
 	federationv1 "github.com/exalsius/flower-operator/api/v1"
 )
 
+const (
+	containerNameSuperLink          = "superlink"
+	containerNameSuperNode          = "supernode"
+	containerNameSuperExecServerApp = "superexec-serverapp"
+	containerNameSuperExecClientApp = "superexec-clientapp"
+)
+
 var _ = Describe("Federation Controller", func() {
 	const (
 		federationName      = "test-federation"
@@ -99,7 +106,7 @@ var _ = Describe("Federation Controller", func() {
 			}, deployment)).To(Succeed())
 			Expect(*deployment.Spec.Replicas).To(Equal(int32(1)))
 			Expect(deployment.Spec.Template.Spec.Containers).To(HaveLen(1)) // No sidecar in subprocess mode
-			Expect(deployment.Spec.Template.Spec.Containers[0].Name).To(Equal("superlink"))
+			Expect(deployment.Spec.Template.Spec.Containers[0].Name).To(Equal(containerNameSuperLink))
 			Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(Equal("flwr/superlink:1.26.0"))
 			Expect(deployment.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--insecure"))
 			Expect(deployment.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--isolation=subprocess"))
@@ -120,7 +127,7 @@ var _ = Describe("Federation Controller", func() {
 				Namespace: federationNamespace,
 			}, daemonSet)).To(Succeed())
 			Expect(daemonSet.Spec.Template.Spec.Containers).To(HaveLen(1)) // No sidecar in subprocess mode
-			Expect(daemonSet.Spec.Template.Spec.Containers[0].Name).To(Equal("supernode"))
+			Expect(daemonSet.Spec.Template.Spec.Containers[0].Name).To(Equal(containerNameSuperNode))
 			Expect(daemonSet.Spec.Template.Spec.Containers[0].Image).To(Equal("flwr/supernode:1.26.0"))
 			Expect(daemonSet.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--insecure"))
 			Expect(daemonSet.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--isolation=subprocess"))
@@ -280,7 +287,7 @@ var _ = Describe("Federation Controller", func() {
 
 			var superexecContainer *corev1.Container
 			for i := range deployment.Spec.Template.Spec.Containers {
-				if deployment.Spec.Template.Spec.Containers[i].Name == "superexec-serverapp" {
+				if deployment.Spec.Template.Spec.Containers[i].Name == containerNameSuperExecServerApp {
 					superexecContainer = &deployment.Spec.Template.Spec.Containers[i]
 					break
 				}
@@ -292,7 +299,7 @@ var _ = Describe("Federation Controller", func() {
 			By("Checking SuperLink container has process isolation args")
 			var superlinkContainer *corev1.Container
 			for i := range deployment.Spec.Template.Spec.Containers {
-				if deployment.Spec.Template.Spec.Containers[i].Name == "superlink" {
+				if deployment.Spec.Template.Spec.Containers[i].Name == containerNameSuperLink {
 					superlinkContainer = &deployment.Spec.Template.Spec.Containers[i]
 					break
 				}
@@ -310,7 +317,7 @@ var _ = Describe("Federation Controller", func() {
 
 			var clientAppContainer *corev1.Container
 			for i := range daemonSet.Spec.Template.Spec.Containers {
-				if daemonSet.Spec.Template.Spec.Containers[i].Name == "superexec-clientapp" {
+				if daemonSet.Spec.Template.Spec.Containers[i].Name == containerNameSuperExecClientApp {
 					clientAppContainer = &daemonSet.Spec.Template.Spec.Containers[i]
 					break
 				}
@@ -1240,7 +1247,7 @@ var _ = Describe("Federation Controller", func() {
 
 			var superexecServerApp *corev1.Container
 			for i := range deployment.Spec.Template.Spec.Containers {
-				if deployment.Spec.Template.Spec.Containers[i].Name == "superexec-serverapp" {
+				if deployment.Spec.Template.Spec.Containers[i].Name == containerNameSuperExecServerApp {
 					superexecServerApp = &deployment.Spec.Template.Spec.Containers[i]
 					break
 				}
@@ -1257,7 +1264,7 @@ var _ = Describe("Federation Controller", func() {
 
 			var superexecClientApp *corev1.Container
 			for i := range daemonSet.Spec.Template.Spec.Containers {
-				if daemonSet.Spec.Template.Spec.Containers[i].Name == "superexec-clientapp" {
+				if daemonSet.Spec.Template.Spec.Containers[i].Name == containerNameSuperExecClientApp {
 					superexecClientApp = &daemonSet.Spec.Template.Spec.Containers[i]
 					break
 				}
@@ -1332,7 +1339,7 @@ var _ = Describe("Federation Controller", func() {
 			By("Checking SuperExec ClientApp sidecar exists")
 			var clientAppContainer *corev1.Container
 			for i := range statefulSet.Spec.Template.Spec.Containers {
-				if statefulSet.Spec.Template.Spec.Containers[i].Name == "superexec-clientapp" {
+				if statefulSet.Spec.Template.Spec.Containers[i].Name == containerNameSuperExecClientApp {
 					clientAppContainer = &statefulSet.Spec.Template.Spec.Containers[i]
 					break
 				}
@@ -1854,9 +1861,9 @@ var _ = Describe("Federation Controller", func() {
 			for i := range deployment.Spec.Template.Spec.Containers {
 				c := &deployment.Spec.Template.Spec.Containers[i]
 				switch c.Name {
-				case "superlink":
+				case containerNameSuperLink:
 					superlinkContainer = c
-				case "superexec-serverapp":
+				case containerNameSuperExecServerApp:
 					superexecServerAppContainer = c
 				}
 			}
@@ -1879,9 +1886,9 @@ var _ = Describe("Federation Controller", func() {
 			for i := range daemonSet.Spec.Template.Spec.Containers {
 				c := &daemonSet.Spec.Template.Spec.Containers[i]
 				switch c.Name {
-				case "supernode":
+				case containerNameSuperNode:
 					supernodeContainer = c
-				case "superexec-clientapp":
+				case containerNameSuperExecClientApp:
 					superexecClientAppContainer = c
 				}
 			}
@@ -2378,7 +2385,7 @@ var _ = Describe("Federation Controller", func() {
 
 			var superlinkContainer *corev1.Container
 			for i := range deployment.Spec.Template.Spec.Containers {
-				if deployment.Spec.Template.Spec.Containers[i].Name == "superlink" {
+				if deployment.Spec.Template.Spec.Containers[i].Name == containerNameSuperLink {
 					superlinkContainer = &deployment.Spec.Template.Spec.Containers[i]
 					break
 				}
@@ -2395,7 +2402,7 @@ var _ = Describe("Federation Controller", func() {
 
 			var supernodeContainer *corev1.Container
 			for i := range daemonSet.Spec.Template.Spec.Containers {
-				if daemonSet.Spec.Template.Spec.Containers[i].Name == "supernode" {
+				if daemonSet.Spec.Template.Spec.Containers[i].Name == containerNameSuperNode {
 					supernodeContainer = &daemonSet.Spec.Template.Spec.Containers[i]
 					break
 				}
@@ -2788,7 +2795,7 @@ var _ = Describe("Federation Controller", func() {
 
 			var supernodeContainer *corev1.Container
 			for i := range daemonSet.Spec.Template.Spec.Containers {
-				if daemonSet.Spec.Template.Spec.Containers[i].Name == "supernode" {
+				if daemonSet.Spec.Template.Spec.Containers[i].Name == containerNameSuperNode {
 					supernodeContainer = &daemonSet.Spec.Template.Spec.Containers[i]
 					break
 				}
@@ -2858,7 +2865,7 @@ var _ = Describe("Federation Controller", func() {
 
 			var supernodeContainer *corev1.Container
 			for i := range daemonSet.Spec.Template.Spec.Containers {
-				if daemonSet.Spec.Template.Spec.Containers[i].Name == "supernode" {
+				if daemonSet.Spec.Template.Spec.Containers[i].Name == containerNameSuperNode {
 					supernodeContainer = &daemonSet.Spec.Template.Spec.Containers[i]
 					break
 				}
@@ -2937,9 +2944,9 @@ var _ = Describe("Federation Controller", func() {
 			for i := range deployment.Spec.Template.Spec.Containers {
 				c := &deployment.Spec.Template.Spec.Containers[i]
 				switch c.Name {
-				case "superlink":
+				case containerNameSuperLink:
 					superlinkContainer = c
-				case "superexec-serverapp":
+				case containerNameSuperExecServerApp:
 					superexecServerAppContainer = c
 				}
 			}
@@ -3032,7 +3039,7 @@ var _ = Describe("Federation Controller", func() {
 
 			var supernodeContainerA *corev1.Container
 			for i := range dsA.Spec.Template.Spec.Containers {
-				if dsA.Spec.Template.Spec.Containers[i].Name == "supernode" {
+				if dsA.Spec.Template.Spec.Containers[i].Name == containerNameSuperNode {
 					supernodeContainerA = &dsA.Spec.Template.Spec.Containers[i]
 					break
 				}
@@ -3056,7 +3063,7 @@ var _ = Describe("Federation Controller", func() {
 
 			var supernodeContainerB *corev1.Container
 			for i := range dsB.Spec.Template.Spec.Containers {
-				if dsB.Spec.Template.Spec.Containers[i].Name == "supernode" {
+				if dsB.Spec.Template.Spec.Containers[i].Name == containerNameSuperNode {
 					supernodeContainerB = &dsB.Spec.Template.Spec.Containers[i]
 					break
 				}
@@ -3136,9 +3143,9 @@ var _ = Describe("Federation Controller", func() {
 			for i := range ds.Spec.Template.Spec.Containers {
 				c := &ds.Spec.Template.Spec.Containers[i]
 				switch c.Name {
-				case "supernode":
+				case containerNameSuperNode:
 					supernodeContainer = c
-				case "superexec-clientapp":
+				case containerNameSuperExecClientApp:
 					superexecClientAppContainer = c
 				}
 			}
@@ -3228,7 +3235,7 @@ var _ = Describe("Federation Controller", func() {
 
 			var supernodeContainer *corev1.Container
 			for i := range ds.Spec.Template.Spec.Containers {
-				if ds.Spec.Template.Spec.Containers[i].Name == "supernode" {
+				if ds.Spec.Template.Spec.Containers[i].Name == containerNameSuperNode {
 					supernodeContainer = &ds.Spec.Template.Spec.Containers[i]
 					break
 				}
@@ -3303,7 +3310,7 @@ var _ = Describe("Federation Controller", func() {
 
 			var superlinkContainer *corev1.Container
 			for i := range deployment.Spec.Template.Spec.Containers {
-				if deployment.Spec.Template.Spec.Containers[i].Name == "superlink" {
+				if deployment.Spec.Template.Spec.Containers[i].Name == containerNameSuperLink {
 					superlinkContainer = &deployment.Spec.Template.Spec.Containers[i]
 					break
 				}
@@ -3389,9 +3396,9 @@ var _ = Describe("Federation Controller", func() {
 			for i := range ds.Spec.Template.Spec.Containers {
 				c := &ds.Spec.Template.Spec.Containers[i]
 				switch c.Name {
-				case "supernode":
+				case containerNameSuperNode:
 					supernodeContainer = c
-				case "superexec-clientapp":
+				case containerNameSuperExecClientApp:
 					superexecContainer = c
 				}
 			}
@@ -3490,9 +3497,9 @@ var _ = Describe("Federation Controller", func() {
 			for i := range ds.Spec.Template.Spec.Containers {
 				c := &ds.Spec.Template.Spec.Containers[i]
 				switch c.Name {
-				case "supernode":
+				case containerNameSuperNode:
 					supernodeContainer = c
-				case "superexec-clientapp":
+				case containerNameSuperExecClientApp:
 					superexecContainer = c
 				}
 			}

@@ -57,6 +57,10 @@ const (
 	// Retry configuration
 	maxRetries        = 5
 	initialRetryDelay = 10 * time.Millisecond
+
+	// GPU vendors
+	gpuVendorNVIDIA = "nvidia"
+	gpuVendorAMD    = "amd"
 )
 
 // FederationReconciler reconciles a Federation object
@@ -948,9 +952,9 @@ func (r *FederationReconciler) getGPUResourceName(gpu *federationv1.GPUConfig) s
 		return gpu.ResourceName
 	}
 	switch gpu.Vendor {
-	case "nvidia":
+	case gpuVendorNVIDIA:
 		return "nvidia.com/gpu"
-	case "amd":
+	case gpuVendorAMD:
 		return "amd.com/gpu"
 	default:
 		return "nvidia.com/gpu"
@@ -963,11 +967,11 @@ func (r *FederationReconciler) applyMountAllGPU(podSpec *corev1.PodSpec, gpu *fe
 	}
 
 	switch gpu.Vendor {
-	case "nvidia":
-		runtimeClass := "nvidia"
+	case gpuVendorNVIDIA:
+		runtimeClass := gpuVendorNVIDIA
 		podSpec.RuntimeClassName = &runtimeClass
 
-	case "amd":
+	case gpuVendorAMD:
 		// Add volumes for AMD GPU access
 		charDevice := corev1.HostPathCharDev
 		directory := corev1.HostPathDirectory
@@ -1000,9 +1004,9 @@ func getMountAllGPUEnvVar(gpu *federationv1.GPUConfig) *corev1.EnvVar {
 	}
 
 	switch gpu.Vendor {
-	case "nvidia":
+	case gpuVendorNVIDIA:
 		return &corev1.EnvVar{Name: "NVIDIA_VISIBLE_DEVICES", Value: "all"}
-	case "amd":
+	case gpuVendorAMD:
 		return &corev1.EnvVar{Name: "ROCR_VISIBLE_DEVICES", Value: "all"}
 	default:
 		return nil
@@ -1010,7 +1014,7 @@ func getMountAllGPUEnvVar(gpu *federationv1.GPUConfig) *corev1.EnvVar {
 }
 
 func getMountAllGPUVolumeMounts(gpu *federationv1.GPUConfig) []corev1.VolumeMount {
-	if gpu == nil || !gpu.MountAll || gpu.Vendor != "amd" {
+	if gpu == nil || !gpu.MountAll || gpu.Vendor != gpuVendorAMD {
 		return nil
 	}
 
@@ -1021,7 +1025,7 @@ func getMountAllGPUVolumeMounts(gpu *federationv1.GPUConfig) []corev1.VolumeMoun
 }
 
 func getMountAllGPUSecurityContext(gpu *federationv1.GPUConfig) *corev1.SecurityContext {
-	if gpu == nil || !gpu.MountAll || gpu.Vendor != "amd" {
+	if gpu == nil || !gpu.MountAll || gpu.Vendor != gpuVendorAMD {
 		return nil
 	}
 
