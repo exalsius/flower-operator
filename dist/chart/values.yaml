@@ -12,7 +12,7 @@ manager:
   replicas: 1
   
   image:
-    repository: controller
+    repository: ghcr.io/exalsius/flower-operator
     tag: latest
     pullPolicy: IfNotPresent
 
