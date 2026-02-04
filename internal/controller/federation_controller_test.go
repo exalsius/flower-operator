@@ -3541,4 +3541,182 @@ var _ = Describe("Federation Controller", func() {
 			Expect(sidecarMountNames).To(ContainElements("dev-kfd", "dev-dri"))
 		})
 	})
+
+	Context("GPU configuration in process mode (StatefulSet)", func() {
+		var federation *federationv1.Federation
+
+		BeforeEach(func() {
+			replicas := int32(2)
+			federation = &federationv1.Federation{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      federationName + "-gpu-process",
+					Namespace: federationNamespace,
+				},
+				Spec: federationv1.FederationSpec{
+					Mode:          federationv1.DeploymentModeStatefulSet,
+					IsolationMode: federationv1.IsolationModeProcess,
+					SuperLink: federationv1.SuperLinkSpec{
+						Image:          "flwr/superlink:1.26.0",
+						SuperExecImage: "flwr/superexec:1.26.0",
+					},
+					SuperNodes: federationv1.SuperNodesSpec{
+						Image: "flwr/supernode:1.26.0",
+						Pools: []federationv1.SuperNodePoolSpec{
+							{
+								Name:     "gpu-pool",
+								Replicas: &replicas,
+								Images: federationv1.PoolImages{
+									SuperExecClientApp: "flwr/superexec:1.26.0",
+								},
+								GPU: &federationv1.GPUConfig{
+									Enabled: true,
+									Vendor:  "nvidia",
+									Count:   2,
+								},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, federation)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			fed := &federationv1.Federation{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: federationName + "-gpu-process", Namespace: federationNamespace}, fed); err == nil {
+				Expect(k8sClient.Delete(ctx, fed)).To(Succeed())
+			}
+		})
+
+		It("should set GPU resources on superexec-clientapp, not supernode", func() {
+			By("Reconciling the Federation")
+			reconciler := &FederationReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: federationName + "-gpu-process", Namespace: federationNamespace},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Checking StatefulSet containers")
+			statefulSet := &appsv1.StatefulSet{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      fmt.Sprintf("%s-gpu-process-supernode-gpu-pool", federationName),
+				Namespace: federationNamespace,
+			}, statefulSet)).To(Succeed())
+			Expect(statefulSet.Spec.Template.Spec.Containers).To(HaveLen(2))
+
+			var supernodeContainer, superexecContainer *corev1.Container
+			for i := range statefulSet.Spec.Template.Spec.Containers {
+				switch statefulSet.Spec.Template.Spec.Containers[i].Name {
+				case containerNameSuperNode:
+					supernodeContainer = &statefulSet.Spec.Template.Spec.Containers[i]
+				case containerNameSuperExecClientApp:
+					superexecContainer = &statefulSet.Spec.Template.Spec.Containers[i]
+				}
+			}
+			Expect(supernodeContainer).NotTo(BeNil())
+			Expect(superexecContainer).NotTo(BeNil())
+
+			By("Verifying supernode does NOT have GPU resources")
+			Expect(supernodeContainer.Resources.Limits).NotTo(HaveKey(corev1.ResourceName("nvidia.com/gpu")))
+			Expect(supernodeContainer.Resources.Requests).NotTo(HaveKey(corev1.ResourceName("nvidia.com/gpu")))
+
+			By("Verifying superexec-clientapp HAS GPU resources")
+			gpuLimit := superexecContainer.Resources.Limits[corev1.ResourceName("nvidia.com/gpu")]
+			Expect(gpuLimit.Equal(resource.MustParse("2"))).To(BeTrue())
+			gpuRequest := superexecContainer.Resources.Requests[corev1.ResourceName("nvidia.com/gpu")]
+			Expect(gpuRequest.Equal(resource.MustParse("2"))).To(BeTrue())
+		})
+	})
+
+	Context("GPU configuration in process mode (DaemonSet)", func() {
+		var federation *federationv1.Federation
+
+		BeforeEach(func() {
+			federation = &federationv1.Federation{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      federationName + "-gpu-process-ds",
+					Namespace: federationNamespace,
+				},
+				Spec: federationv1.FederationSpec{
+					Mode:          federationv1.DeploymentModeDaemonSet,
+					IsolationMode: federationv1.IsolationModeProcess,
+					SuperLink: federationv1.SuperLinkSpec{
+						Image:          "flwr/superlink:1.26.0",
+						SuperExecImage: "flwr/superexec:1.26.0",
+					},
+					SuperNodes: federationv1.SuperNodesSpec{
+						Image: "flwr/supernode:1.26.0",
+						Pools: []federationv1.SuperNodePoolSpec{
+							{
+								Name: "gpu-pool",
+								Images: federationv1.PoolImages{
+									SuperExecClientApp: "flwr/superexec:1.26.0",
+								},
+								GPU: &federationv1.GPUConfig{
+									Enabled: true,
+									Vendor:  "nvidia",
+									Count:   4,
+								},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, federation)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			fed := &federationv1.Federation{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: federationName + "-gpu-process-ds", Namespace: federationNamespace}, fed); err == nil {
+				Expect(k8sClient.Delete(ctx, fed)).To(Succeed())
+			}
+		})
+
+		It("should set GPU resources on superexec-clientapp, not supernode", func() {
+			By("Reconciling the Federation")
+			reconciler := &FederationReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: federationName + "-gpu-process-ds", Namespace: federationNamespace},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Checking DaemonSet containers")
+			daemonSet := &appsv1.DaemonSet{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      fmt.Sprintf("%s-gpu-process-ds-supernode-gpu-pool", federationName),
+				Namespace: federationNamespace,
+			}, daemonSet)).To(Succeed())
+			Expect(daemonSet.Spec.Template.Spec.Containers).To(HaveLen(2))
+
+			var supernodeContainer, superexecContainer *corev1.Container
+			for i := range daemonSet.Spec.Template.Spec.Containers {
+				switch daemonSet.Spec.Template.Spec.Containers[i].Name {
+				case containerNameSuperNode:
+					supernodeContainer = &daemonSet.Spec.Template.Spec.Containers[i]
+				case containerNameSuperExecClientApp:
+					superexecContainer = &daemonSet.Spec.Template.Spec.Containers[i]
+				}
+			}
+			Expect(supernodeContainer).NotTo(BeNil())
+			Expect(superexecContainer).NotTo(BeNil())
+
+			By("Verifying supernode does NOT have GPU resources")
+			Expect(supernodeContainer.Resources.Limits).NotTo(HaveKey(corev1.ResourceName("nvidia.com/gpu")))
+			Expect(supernodeContainer.Resources.Requests).NotTo(HaveKey(corev1.ResourceName("nvidia.com/gpu")))
+
+			By("Verifying superexec-clientapp HAS GPU resources")
+			gpuLimit := superexecContainer.Resources.Limits[corev1.ResourceName("nvidia.com/gpu")]
+			Expect(gpuLimit.Equal(resource.MustParse("4"))).To(BeTrue())
+			gpuRequest := superexecContainer.Resources.Requests[corev1.ResourceName("nvidia.com/gpu")]
+			Expect(gpuRequest.Equal(resource.MustParse("4"))).To(BeTrue())
+		})
+	})
 })

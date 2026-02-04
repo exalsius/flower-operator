@@ -459,8 +459,10 @@ func (r *FederationReconciler) buildSuperNodeContainer(federation *federationv1.
 	}
 
 	resources := pool.SuperNodeResources.DeepCopy()
-	// Only set GPU resource requests when enabled=true and mountAll=false
-	if pool.GPU != nil && pool.GPU.Enabled && !pool.GPU.MountAll {
+	// Only set GPU resource requests on supernode when:
+	// - enabled=true and mountAll=false
+	// - AND we're in subprocess mode (in process mode, GPUs go to superexec-clientapp)
+	if pool.GPU != nil && pool.GPU.Enabled && !pool.GPU.MountAll && federation.Spec.IsolationMode == federationv1.IsolationModeSubprocess {
 		resourceName := r.getGPUResourceName(pool.GPU)
 		count := int64(pool.GPU.Count)
 		if count == 0 {
@@ -521,11 +523,31 @@ func (r *FederationReconciler) buildSuperExecClientAppContainer(federation *fede
 		userMounts = pool.VolumeMounts
 	}
 
+	// In process mode, GPUs should be mounted to superexec-clientapp (not supernode)
+	resources := pool.SuperExecResources.DeepCopy()
+	if pool.GPU != nil && pool.GPU.Enabled && !pool.GPU.MountAll {
+		resourceName := r.getGPUResourceName(pool.GPU)
+		count := int64(pool.GPU.Count)
+		if count == 0 {
+			count = 1
+		}
+		quantity := resource.NewQuantity(count, resource.DecimalSI)
+
+		if resources.Limits == nil {
+			resources.Limits = corev1.ResourceList{}
+		}
+		if resources.Requests == nil {
+			resources.Requests = corev1.ResourceList{}
+		}
+		resources.Limits[corev1.ResourceName(resourceName)] = *quantity
+		resources.Requests[corev1.ResourceName(resourceName)] = *quantity
+	}
+
 	container := corev1.Container{
 		Name:         "superexec-clientapp",
 		Image:        pool.Images.SuperExecClientApp,
 		Args:         args,
-		Resources:    pool.SuperExecResources,
+		Resources:    *resources,
 		Env:          envVars,
 		VolumeMounts: mergeVolumeMounts(userMounts, getMountAllGPUVolumeMounts(pool.GPU)),
 	}
