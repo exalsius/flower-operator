@@ -1,0 +1,62 @@
+# Example: Federation with volumes for e2e testing
+# Uses EmptyDir volumes (no external dependencies)
+apiVersion: flwr.exalsius.ai/v1
+kind: Federation
+metadata:
+  name: federation-volumes-e2e
+spec:
+  mode: DaemonSet
+  isolationMode: process
+
+  superlink:
+    image: flwr/superlink:1.17.0
+    superexecImage: flwr/superexec:1.17.0
+
+    # Pod-level volumes
+    volumes:
+      - name: superlink-data
+        emptyDir:
+          sizeLimit: 100Mi
+      - name: superlink-config
+        emptyDir: {}
+
+    # SuperLink container mounts
+    volumeMounts:
+      - name: superlink-data
+        mountPath: /data
+      - name: superlink-config
+        mountPath: /config
+        readOnly: true
+
+    # SuperExec sidecar gets only the data volume
+    superexecVolumeMounts:
+      - name: superlink-data
+        mountPath: /app/data
+
+  supernodes:
+    image: flwr/supernode:1.17.0
+    pools:
+      - name: default
+        images:
+          superexecClientApp: flwr/superexec:1.17.0
+
+        # Pod-level volumes for this pool
+        volumes:
+          - name: pool-data
+            emptyDir:
+              sizeLimit: 200Mi
+          - name: pool-scratch
+            emptyDir: {}
+
+        # SuperNode container mounts
+        volumeMounts:
+          - name: pool-data
+            mountPath: /data
+          - name: pool-scratch
+            mountPath: /tmp/scratch
+
+        # SuperExec sidecar mounts (different paths)
+        superexecVolumeMounts:
+          - name: pool-data
+            mountPath: /app/data
+            readOnly: true

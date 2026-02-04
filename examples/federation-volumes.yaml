@@ -1,0 +1,102 @@
+# Example: Federation with PersistentVolumeClaims and other volumes
+#
+# This example demonstrates how to attach volumes to Flower workloads:
+# - PersistentVolumeClaims for model storage and datasets
+# - ConfigMaps for configuration files
+# - Secrets for TLS certificates
+# - EmptyDir for scratch space
+#
+# Prerequisites:
+# - Create the PVCs before applying this Federation
+# - Create the ConfigMap and Secret referenced below
+
+apiVersion: flwr.exalsius.ai/v1
+kind: Federation
+metadata:
+  name: federation-with-storage
+spec:
+  mode: StatefulSet
+  isolationMode: process
+
+  superlink:
+    image: flwr/superlink:1.17.0
+    superexecImage: my-serverapp:latest
+
+    # Pod-level volumes for SuperLink Deployment
+    volumes:
+      - name: model-storage
+        persistentVolumeClaim:
+          claimName: flower-models-pvc
+      - name: tls-certs
+        secret:
+          secretName: flower-tls
+
+    # SuperLink container mounts
+    volumeMounts:
+      - name: model-storage
+        mountPath: /models
+      - name: tls-certs
+        mountPath: /etc/ssl/flower
+        readOnly: true
+
+    # SuperExec ServerApp sidecar mounts (if different from main container)
+    # If not specified, defaults to volumeMounts
+    superexecVolumeMounts:
+      - name: model-storage
+        mountPath: /app/models
+
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+
+    service:
+      type: ClusterIP
+
+  supernodes:
+    image: flwr/supernode:1.17.0
+    pools:
+      - name: training-pool
+        replicas: 4
+        images:
+          superexecClientApp: my-clientapp:latest
+
+        # Pod-level volumes for this pool's workloads
+        volumes:
+          - name: datasets
+            persistentVolumeClaim:
+              claimName: training-data-pvc
+          - name: scratch
+            emptyDir:
+              sizeLimit: 10Gi
+          - name: config
+            configMap:
+              name: flower-client-config
+
+        # SuperNode container mounts
+        volumeMounts:
+          - name: datasets
+            mountPath: /data
+            readOnly: true
+          - name: scratch
+            mountPath: /tmp/scratch
+          - name: config
+            mountPath: /etc/flower
+            readOnly: true
+
+        # SuperExec ClientApp sidecar mounts
+        # This is where actual training code runs, so it needs data access
+        superexecVolumeMounts:
+          - name: datasets
+            mountPath: /app/data
+            readOnly: true
+          - name: scratch
+            mountPath: /app/scratch
+          - name: config
+            mountPath: /app/config
+            readOnly: true
+
+        supernodeResources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"

@@ -538,6 +538,106 @@ var _ = Describe("Manager", Ordered, func() {
 			Eventually(verifyPoolBImage, time.Minute, time.Second).Should(Succeed())
 		})
 
+		It("should create workloads with volumes and volumeMounts", func() {
+			By("applying Federation CR with volumes")
+			cmd := exec.Command("kubectl", "apply", "-f",
+				"examples/federation-volumes-e2e.yaml",
+				"-n", federationTestNamespace)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying SuperLink Deployment is created")
+			verifyDeployment := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "deployment",
+					"federation-volumes-e2e-superlink", "-n", federationTestNamespace)
+				_, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+			Eventually(verifyDeployment, 2*time.Minute, time.Second).Should(Succeed())
+
+			By("verifying SuperLink Deployment has volumes")
+			verifySuperlinkVolumes := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "deployment",
+					"federation-volumes-e2e-superlink", "-n", federationTestNamespace,
+					"-o", "jsonpath={.spec.template.spec.volumes[*].name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				volumes := strings.Fields(output)
+				g.Expect(volumes).To(ContainElements("superlink-data", "superlink-config"))
+			}
+			Eventually(verifySuperlinkVolumes, time.Minute, time.Second).Should(Succeed())
+
+			By("verifying SuperLink container has volumeMounts")
+			verifySuperlinkMounts := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "deployment",
+					"federation-volumes-e2e-superlink", "-n", federationTestNamespace,
+					"-o", "jsonpath={.spec.template.spec.containers[?(@.name=='superlink')].volumeMounts[*].name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				mounts := strings.Fields(output)
+				g.Expect(mounts).To(ContainElements("superlink-data", "superlink-config"))
+			}
+			Eventually(verifySuperlinkMounts, time.Minute, time.Second).Should(Succeed())
+
+			By("verifying SuperExec ServerApp sidecar has volumeMounts")
+			verifySuperexecServerappMounts := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "deployment",
+					"federation-volumes-e2e-superlink", "-n", federationTestNamespace,
+					"-o", "jsonpath={.spec.template.spec.containers[?(@.name=='superexec-serverapp')].volumeMounts[*].name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				mounts := strings.Fields(output)
+				// SuperExec sidecar should only have superlink-data (from superexecVolumeMounts)
+				g.Expect(mounts).To(ContainElement("superlink-data"))
+				g.Expect(mounts).NotTo(ContainElement("superlink-config"))
+			}
+			Eventually(verifySuperexecServerappMounts, time.Minute, time.Second).Should(Succeed())
+
+			By("verifying SuperNode DaemonSet is created")
+			verifyDaemonSet := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "daemonset",
+					"federation-volumes-e2e-supernode-default", "-n", federationTestNamespace)
+				_, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+			Eventually(verifyDaemonSet, 2*time.Minute, time.Second).Should(Succeed())
+
+			By("verifying SuperNode DaemonSet has volumes")
+			verifyPoolVolumes := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "daemonset",
+					"federation-volumes-e2e-supernode-default", "-n", federationTestNamespace,
+					"-o", "jsonpath={.spec.template.spec.volumes[*].name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				volumes := strings.Fields(output)
+				g.Expect(volumes).To(ContainElements("pool-data", "pool-scratch"))
+			}
+			Eventually(verifyPoolVolumes, time.Minute, time.Second).Should(Succeed())
+
+			By("verifying SuperNode container has volumeMounts")
+			verifySupernodeMounts := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "daemonset",
+					"federation-volumes-e2e-supernode-default", "-n", federationTestNamespace,
+					"-o", "jsonpath={.spec.template.spec.containers[?(@.name=='supernode')].volumeMounts[*].name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				mounts := strings.Fields(output)
+				g.Expect(mounts).To(ContainElements("pool-data", "pool-scratch"))
+			}
+			Eventually(verifySupernodeMounts, time.Minute, time.Second).Should(Succeed())
+
+			By("verifying SuperExec ClientApp sidecar has volumeMounts with readOnly")
+			verifySuperexecClientappMounts := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "daemonset",
+					"federation-volumes-e2e-supernode-default", "-n", federationTestNamespace,
+					"-o", "jsonpath={.spec.template.spec.containers[?(@.name=='superexec-clientapp')].volumeMounts[?(@.name=='pool-data')].readOnly}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("true"))
+			}
+			Eventually(verifySuperexecClientappMounts, time.Minute, time.Second).Should(Succeed())
+		})
+
 		It("should update status with Ready condition", func() {
 			By("applying Federation CR")
 			cmd := exec.Command("kubectl", "apply", "-f",

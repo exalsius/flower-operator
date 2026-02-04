@@ -26,7 +26,7 @@ spec:
     pools:
       - name: default
         # Required in StatefulSet mode
-        replicas: 10
+        replicas: 2
         images: {}
         # Resource configuration for SuperNode container
         supernodeResources:
