@@ -638,6 +638,66 @@ var _ = Describe("Manager", Ordered, func() {
 			Eventually(verifySuperexecClientappMounts, time.Minute, time.Second).Should(Succeed())
 		})
 
+		It("should create StatefulSet with volumeClaimTemplates", func() {
+			By("applying Federation CR with volumeClaimTemplates")
+			cmd := exec.Command("kubectl", "apply", "-f",
+				"examples/federation-volumeclaimtemplates-e2e.yaml",
+				"-n", federationTestNamespace)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying SuperLink Deployment is created")
+			verifyDeployment := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "deployment",
+					"federation-vct-e2e-superlink", "-n", federationTestNamespace)
+				_, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+			Eventually(verifyDeployment, 2*time.Minute, time.Second).Should(Succeed())
+
+			By("verifying SuperNode StatefulSet is created")
+			verifyStatefulSet := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "statefulset",
+					"federation-vct-e2e-supernode-default", "-n", federationTestNamespace)
+				_, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+			Eventually(verifyStatefulSet, 2*time.Minute, time.Second).Should(Succeed())
+
+			By("verifying StatefulSet has volumeClaimTemplates")
+			verifyVCT := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "statefulset",
+					"federation-vct-e2e-supernode-default", "-n", federationTestNamespace,
+					"-o", "jsonpath={.spec.volumeClaimTemplates[*].metadata.name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("data"))
+			}
+			Eventually(verifyVCT, time.Minute, time.Second).Should(Succeed())
+
+			By("verifying StatefulSet volumeClaimTemplates has correct storage request")
+			verifyStorage := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "statefulset",
+					"federation-vct-e2e-supernode-default", "-n", federationTestNamespace,
+					"-o", "jsonpath={.spec.volumeClaimTemplates[0].spec.resources.requests.storage}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("1Gi"))
+			}
+			Eventually(verifyStorage, time.Minute, time.Second).Should(Succeed())
+
+			By("verifying SuperNode container has volumeMount for the PVC")
+			verifyMount := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "statefulset",
+					"federation-vct-e2e-supernode-default", "-n", federationTestNamespace,
+					"-o", "jsonpath={.spec.template.spec.containers[?(@.name=='supernode')].volumeMounts[?(@.name=='data')].mountPath}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("/data"))
+			}
+			Eventually(verifyMount, time.Minute, time.Second).Should(Succeed())
+		})
+
 		It("should update status with Ready condition", func() {
 			By("applying Federation CR")
 			cmd := exec.Command("kubectl", "apply", "-f",

@@ -1,0 +1,37 @@
+# Example: Federation with volumeClaimTemplates for e2e testing
+# Uses standard StorageClass (available in Kind)
+apiVersion: flwr.exalsius.ai/v1
+kind: Federation
+metadata:
+  name: federation-vct-e2e
+spec:
+  mode: StatefulSet
+  isolationMode: subprocess
+
+  superlink:
+    image: flwr/superlink:1.25.0
+    service:
+      type: ClusterIP
+
+  supernodes:
+    image: flwr/supernode:1.25.0
+    pools:
+      - name: default
+        replicas: 2
+        images: {}
+
+        # PVC templates - creates a PVC per replica
+        volumeClaimTemplates:
+          - metadata:
+              name: data
+            spec:
+              accessModes:
+                - ReadWriteOnce
+              resources:
+                requests:
+                  storage: 1Gi
+
+        # Mount the per-pod PVC
+        volumeMounts:
+          - name: data
+            mountPath: /data

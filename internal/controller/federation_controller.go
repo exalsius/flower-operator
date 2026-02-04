@@ -379,6 +379,20 @@ func (r *FederationReconciler) buildStatefulSet(federation *federationv1.Federat
 		replicas = *pool.Replicas
 	}
 
+	// Convert PersistentVolumeClaimTemplate to corev1.PersistentVolumeClaim
+	volumeClaimTemplates := make([]corev1.PersistentVolumeClaim, 0, len(pool.VolumeClaimTemplates))
+	for _, vct := range pool.VolumeClaimTemplates {
+		pvc := corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        vct.Metadata.Name,
+				Labels:      vct.Metadata.Labels,
+				Annotations: vct.Metadata.Annotations,
+			},
+			Spec: vct.Spec,
+		}
+		volumeClaimTemplates = append(volumeClaimTemplates, pvc)
+	}
+
 	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -390,7 +404,8 @@ func (r *FederationReconciler) buildStatefulSet(federation *federationv1.Federat
 			Selector: &metav1.LabelSelector{
 				MatchLabels: labels,
 			},
-			ServiceName: name,
+			ServiceName:          name,
+			VolumeClaimTemplates: volumeClaimTemplates,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: labels,

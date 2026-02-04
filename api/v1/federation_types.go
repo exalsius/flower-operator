@@ -301,6 +301,39 @@ type SuperNodePoolSpec struct {
 	// If not specified, defaults to VolumeMounts.
 	// +kubebuilder:validation:Optional
 	SuperExecVolumeMounts []corev1.VolumeMount `json:"superexecVolumeMounts,omitempty"`
+
+	// VolumeClaimTemplates defines PVC templates for StatefulSet mode.
+	// Each template creates a PVC per replica (e.g., <name>-<pool>-0, <name>-<pool>-1).
+	// Only used when spec.mode is StatefulSet; ignored for DaemonSet mode.
+	// +kubebuilder:validation:Optional
+	VolumeClaimTemplates []PersistentVolumeClaimTemplate `json:"volumeClaimTemplates,omitempty"`
+}
+
+// PersistentVolumeClaimTemplate defines a PVC template for StatefulSet volumeClaimTemplates
+type PersistentVolumeClaimTemplate struct {
+	// Metadata for the PVC. Only name is required.
+	// +kubebuilder:validation:Required
+	Metadata PersistentVolumeClaimTemplateMeta `json:"metadata"`
+
+	// Spec defines the desired characteristics of a volume.
+	// +kubebuilder:validation:Required
+	Spec corev1.PersistentVolumeClaimSpec `json:"spec"`
+}
+
+// PersistentVolumeClaimTemplateMeta defines metadata for PVC templates
+type PersistentVolumeClaimTemplateMeta struct {
+	// Name of the PVC. This will be used as the volume name for mounting.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// Labels to add to the PVC.
+	// +kubebuilder:validation:Optional
+	Labels map[string]string `json:"labels,omitempty"`
+
+	// Annotations to add to the PVC.
+	// +kubebuilder:validation:Optional
+	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
 // PoolImages defines the container images for a SuperNode pool
