@@ -157,6 +157,7 @@ func (r *FederationReconciler) buildSuperLinkDeployment(federation *federationv1
 
 	podSpec := corev1.PodSpec{
 		Containers: containers,
+		Volumes:    federation.Spec.SuperLink.Volumes,
 	}
 
 	// Merge podTemplate overrides
@@ -208,12 +209,13 @@ func (r *FederationReconciler) buildSuperLinkContainer(federation *federationv1.
 	}
 
 	return corev1.Container{
-		Name:      "superlink",
-		Image:     federation.Spec.SuperLink.Image,
-		Args:      args,
-		Ports:     ports,
-		Resources: federation.Spec.SuperLink.Resources,
-		Env:       federation.Spec.SuperLink.Env,
+		Name:         "superlink",
+		Image:        federation.Spec.SuperLink.Image,
+		Args:         args,
+		Ports:        ports,
+		Resources:    federation.Spec.SuperLink.Resources,
+		Env:          federation.Spec.SuperLink.Env,
+		VolumeMounts: federation.Spec.SuperLink.VolumeMounts,
 	}
 }
 
@@ -226,12 +228,19 @@ func (r *FederationReconciler) buildSuperExecServerAppContainer(federation *fede
 		args = append(args, "--insecure")
 	}
 
+	// Use SuperExecVolumeMounts if specified, otherwise fall back to VolumeMounts
+	volumeMounts := federation.Spec.SuperLink.SuperExecVolumeMounts
+	if len(volumeMounts) == 0 {
+		volumeMounts = federation.Spec.SuperLink.VolumeMounts
+	}
+
 	return corev1.Container{
-		Name:      "superexec-serverapp",
-		Image:     federation.Spec.SuperLink.SuperExecImage,
-		Args:      args,
-		Resources: federation.Spec.SuperLink.SuperExecResources,
-		Env:       federation.Spec.SuperLink.Env,
+		Name:         "superexec-serverapp",
+		Image:        federation.Spec.SuperLink.SuperExecImage,
+		Args:         args,
+		Resources:    federation.Spec.SuperLink.SuperExecResources,
+		Env:          federation.Spec.SuperLink.Env,
+		VolumeMounts: volumeMounts,
 	}
 }
 
@@ -308,6 +317,7 @@ func (r *FederationReconciler) buildDaemonSet(federation *federationv1.Federatio
 
 	podSpec := corev1.PodSpec{
 		Containers: containers,
+		Volumes:    pool.Volumes,
 	}
 
 	// Apply mountAll GPU config (runtimeClassName for NVIDIA, volumes for AMD)
@@ -353,6 +363,7 @@ func (r *FederationReconciler) buildStatefulSet(federation *federationv1.Federat
 
 	podSpec := corev1.PodSpec{
 		Containers: containers,
+		Volumes:    pool.Volumes,
 	}
 
 	// Apply mountAll GPU config (runtimeClassName for NVIDIA, volumes for AMD)
@@ -448,7 +459,7 @@ func (r *FederationReconciler) buildSuperNodeContainer(federation *federationv1.
 		Ports:        ports,
 		Resources:    *resources,
 		Env:          envVars,
-		VolumeMounts: getMountAllGPUVolumeMounts(pool.GPU),
+		VolumeMounts: mergeVolumeMounts(pool.VolumeMounts, getMountAllGPUVolumeMounts(pool.GPU)),
 	}
 
 	// Set security context for AMD GPU access
@@ -473,13 +484,19 @@ func (r *FederationReconciler) buildSuperExecClientAppContainer(federation *fede
 		envVars = append(envVars, *gpuEnv)
 	}
 
+	// Use SuperExecVolumeMounts if specified, otherwise fall back to VolumeMounts
+	userMounts := pool.SuperExecVolumeMounts
+	if len(userMounts) == 0 {
+		userMounts = pool.VolumeMounts
+	}
+
 	container := corev1.Container{
 		Name:         "superexec-clientapp",
 		Image:        pool.Images.SuperExecClientApp,
 		Args:         args,
 		Resources:    pool.SuperExecResources,
 		Env:          envVars,
-		VolumeMounts: getMountAllGPUVolumeMounts(pool.GPU),
+		VolumeMounts: mergeVolumeMounts(userMounts, getMountAllGPUVolumeMounts(pool.GPU)),
 	}
 
 	// Set security context for AMD GPU access
@@ -943,6 +960,28 @@ func mergeEnvVars(base, override []corev1.EnvVar) []corev1.EnvVar {
 	result := make([]corev1.EnvVar, 0, len(envMap))
 	for _, e := range envMap {
 		result = append(result, e)
+	}
+	return result
+}
+
+// mergeVolumeMounts merges two volume mount slices; user mounts take precedence by Name.
+func mergeVolumeMounts(user, operator []corev1.VolumeMount) []corev1.VolumeMount {
+	if len(user) == 0 {
+		return operator
+	}
+	if len(operator) == 0 {
+		return user
+	}
+	mountMap := make(map[string]corev1.VolumeMount)
+	for _, m := range operator {
+		mountMap[m.Name] = m
+	}
+	for _, m := range user {
+		mountMap[m.Name] = m
+	}
+	result := make([]corev1.VolumeMount, 0, len(mountMap))
+	for _, m := range mountMap {
+		result = append(result, m)
 	}
 	return result
 }

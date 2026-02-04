@@ -160,6 +160,20 @@ type SuperLinkSpec struct {
 	// Service config for exposing the SuperLink endpoints used by `flwr run`.
 	// +kubebuilder:validation:Optional
 	Service SuperLinkServiceSpec `json:"service,omitempty"`
+
+	// Volumes defines pod-level volumes for the SuperLink Deployment.
+	// These are merged with any volumes defined in PodTemplate.
+	// +kubebuilder:validation:Optional
+	Volumes []corev1.Volume `json:"volumes,omitempty"`
+
+	// VolumeMounts defines volume mounts for the SuperLink container.
+	// +kubebuilder:validation:Optional
+	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
+
+	// SuperExecVolumeMounts defines volume mounts for the SuperExec ServerApp sidecar (process mode).
+	// If not specified, defaults to VolumeMounts.
+	// +kubebuilder:validation:Optional
+	SuperExecVolumeMounts []corev1.VolumeMount `json:"superexecVolumeMounts,omitempty"`
 }
 
 // SuperLinkServiceSpec defines service configuration for SuperLink
@@ -272,6 +286,21 @@ type SuperNodePoolSpec struct {
 	// In process mode, these are also applied to the SuperExec ClientApp sidecar.
 	// +kubebuilder:validation:Optional
 	Env []corev1.EnvVar `json:"env,omitempty"`
+
+	// Volumes defines pod-level volumes for this pool's workloads.
+	// These are merged with any volumes defined in PodTemplate and operator-managed volumes (GPU).
+	// +kubebuilder:validation:Optional
+	Volumes []corev1.Volume `json:"volumes,omitempty"`
+
+	// VolumeMounts defines volume mounts for the SuperNode container.
+	// These are merged with operator-managed mounts (GPU); user mounts take precedence on name conflicts.
+	// +kubebuilder:validation:Optional
+	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
+
+	// SuperExecVolumeMounts defines volume mounts for the SuperExec ClientApp sidecar (process mode).
+	// If not specified, defaults to VolumeMounts.
+	// +kubebuilder:validation:Optional
+	SuperExecVolumeMounts []corev1.VolumeMount `json:"superexecVolumeMounts,omitempty"`
 }
 
 // PoolImages defines the container images for a SuperNode pool
