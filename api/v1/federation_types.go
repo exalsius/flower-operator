@@ -174,6 +174,11 @@ type SuperLinkSpec struct {
 	// If not specified, defaults to VolumeMounts.
 	// +kubebuilder:validation:Optional
 	SuperExecVolumeMounts []corev1.VolumeMount `json:"superexecVolumeMounts,omitempty"`
+
+	// VolumeClaimTemplates defines PVC templates for the SuperLink StatefulSet.
+	// Each template creates a PVC that persists across pod restarts.
+	// +kubebuilder:validation:Optional
+	VolumeClaimTemplates []PersistentVolumeClaimTemplate `json:"volumeClaimTemplates,omitempty"`
 }
 
 // SuperLinkServiceSpec defines service configuration for SuperLink

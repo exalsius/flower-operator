@@ -90,9 +90,9 @@ func (r *FederationReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	superLinkDeployment, err := r.reconcileSuperLinkDeployment(ctx, federation)
+	superLinkStatefulSet, err := r.reconcileSuperLinkStatefulSet(ctx, federation)
 	if err != nil {
-		logger.Error(err, "failed to reconcile SuperLink Deployment")
+		logger.Error(err, "failed to reconcile SuperLink StatefulSet")
 		return ctrl.Result{}, err
 	}
 
@@ -117,7 +117,7 @@ func (r *FederationReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	if err := r.updateStatus(ctx, federation, superLinkDeployment, superLinkService, poolStatuses); err != nil {
+	if err := r.updateStatus(ctx, federation, superLinkStatefulSet, superLinkService, poolStatuses); err != nil {
 		logger.Error(err, "failed to update status")
 		return ctrl.Result{}, err
 	}
@@ -140,7 +140,7 @@ func (r *FederationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // Builder Functions
 // =============================================================================
 
-func (r *FederationReconciler) buildSuperLinkDeployment(federation *federationv1.Federation) *appsv1.Deployment {
+func (r *FederationReconciler) buildSuperLinkStatefulSet(federation *federationv1.Federation) *appsv1.StatefulSet {
 	name := fmt.Sprintf("%s-superlink", federation.Name)
 	labels := r.buildLabels(federation, "superlink", "superlink", "")
 
@@ -165,17 +165,33 @@ func (r *FederationReconciler) buildSuperLinkDeployment(federation *federationv1
 		podSpec = r.mergePodSpec(podSpec, pt.Spec)
 	}
 
-	return &appsv1.Deployment{
+	// Convert PersistentVolumeClaimTemplate to corev1.PersistentVolumeClaim
+	volumeClaimTemplates := make([]corev1.PersistentVolumeClaim, 0, len(federation.Spec.SuperLink.VolumeClaimTemplates))
+	for _, vct := range federation.Spec.SuperLink.VolumeClaimTemplates {
+		pvc := corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        vct.Metadata.Name,
+				Labels:      vct.Metadata.Labels,
+				Annotations: vct.Metadata.Annotations,
+			},
+			Spec: vct.Spec,
+		}
+		volumeClaimTemplates = append(volumeClaimTemplates, pvc)
+	}
+
+	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: federation.Namespace,
 			Labels:    labels,
 		},
-		Spec: appsv1.DeploymentSpec{
+		Spec: appsv1.StatefulSetSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: labels,
 			},
+			ServiceName:          name,
+			VolumeClaimTemplates: volumeClaimTemplates,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: labels,
@@ -555,40 +571,40 @@ func (r *FederationReconciler) updateWithRetry(ctx context.Context, obj client.O
 	return fmt.Errorf("failed after %d retries: %w", maxRetries, lastErr)
 }
 
-func (r *FederationReconciler) reconcileSuperLinkDeployment(ctx context.Context, federation *federationv1.Federation) (*appsv1.Deployment, error) {
+func (r *FederationReconciler) reconcileSuperLinkStatefulSet(ctx context.Context, federation *federationv1.Federation) (*appsv1.StatefulSet, error) {
 	logger := log.FromContext(ctx)
-	desired := r.buildSuperLinkDeployment(federation)
+	desired := r.buildSuperLinkStatefulSet(federation)
 
 	if err := controllerutil.SetControllerReference(federation, desired, r.Scheme); err != nil {
 		return nil, fmt.Errorf("failed to set owner reference: %w", err)
 	}
 
-	existing := &appsv1.Deployment{}
+	existing := &appsv1.StatefulSet{}
 	err := r.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			logger.Info("creating SuperLink Deployment", "name", desired.Name)
+			logger.Info("creating SuperLink StatefulSet", "name", desired.Name)
 			if err := r.Create(ctx, desired); err != nil {
-				return nil, fmt.Errorf("failed to create deployment: %w", err)
+				return nil, fmt.Errorf("failed to create statefulset: %w", err)
 			}
 			return desired, nil
 		}
-		return nil, fmt.Errorf("failed to get deployment: %w", err)
+		return nil, fmt.Errorf("failed to get statefulset: %w", err)
 	}
 
-	latest := &appsv1.Deployment{}
+	latest := &appsv1.StatefulSet{}
 	latest.Name = desired.Name
 	latest.Namespace = desired.Namespace
 	if err := r.updateWithRetry(ctx, latest, func(obj client.Object) error {
-		dep := obj.(*appsv1.Deployment)
-		dep.Spec = desired.Spec
-		dep.Labels = desired.Labels
-		if err := controllerutil.SetControllerReference(federation, dep, r.Scheme); err != nil {
+		sts := obj.(*appsv1.StatefulSet)
+		sts.Spec = desired.Spec
+		sts.Labels = desired.Labels
+		if err := controllerutil.SetControllerReference(federation, sts, r.Scheme); err != nil {
 			return fmt.Errorf("failed to set owner reference: %w", err)
 		}
-		return r.Update(ctx, dep)
+		return r.Update(ctx, sts)
 	}); err != nil {
-		return nil, fmt.Errorf("failed to update deployment: %w", err)
+		return nil, fmt.Errorf("failed to update statefulset: %w", err)
 	}
 
 	return latest, nil
@@ -867,7 +883,7 @@ func (r *FederationReconciler) cleanupOrphanedPools(ctx context.Context, federat
 	return nil
 }
 
-func (r *FederationReconciler) updateStatus(ctx context.Context, federation *federationv1.Federation, deployment *appsv1.Deployment, service *corev1.Service, poolStatuses []federationv1.PoolStatus) error {
+func (r *FederationReconciler) updateStatus(ctx context.Context, federation *federationv1.Federation, superLinkSts *appsv1.StatefulSet, service *corev1.Service, poolStatuses []federationv1.PoolStatus) error {
 	latest := &federationv1.Federation{}
 	if err := r.Get(ctx, types.NamespacedName{Name: federation.Name, Namespace: federation.Namespace}, latest); err != nil {
 		return fmt.Errorf("failed to re-fetch federation: %w", err)
@@ -895,9 +911,9 @@ func (r *FederationReconciler) updateStatus(ctx context.Context, federation *fed
 	ready := true
 	message := "All components are ready"
 
-	if deployment.Status.ReadyReplicas < 1 {
+	if superLinkSts.Status.ReadyReplicas < 1 {
 		ready = false
-		message = "SuperLink deployment not ready"
+		message = "SuperLink StatefulSet not ready"
 	}
 
 	for _, ps := range poolStatuses {

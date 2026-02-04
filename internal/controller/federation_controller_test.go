@@ -86,7 +86,7 @@ var _ = Describe("Federation Controller", func() {
 			}
 		})
 
-		It("should create SuperLink Deployment, Service, and DaemonSet", func() {
+		It("should create SuperLink StatefulSet, Service, and DaemonSet", func() {
 			By("Reconciling the Federation")
 			reconciler := &FederationReconciler{
 				Client: k8sClient,
@@ -98,18 +98,18 @@ var _ = Describe("Federation Controller", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Checking SuperLink Deployment was created")
-			deployment := &appsv1.Deployment{}
+			By("Checking SuperLink StatefulSet was created")
+			statefulSet := &appsv1.StatefulSet{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name:      fmt.Sprintf("%s-superlink", federationName),
 				Namespace: federationNamespace,
-			}, deployment)).To(Succeed())
-			Expect(*deployment.Spec.Replicas).To(Equal(int32(1)))
-			Expect(deployment.Spec.Template.Spec.Containers).To(HaveLen(1)) // No sidecar in subprocess mode
-			Expect(deployment.Spec.Template.Spec.Containers[0].Name).To(Equal(containerNameSuperLink))
-			Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(Equal("flwr/superlink:1.26.0"))
-			Expect(deployment.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--insecure"))
-			Expect(deployment.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--isolation=subprocess"))
+			}, statefulSet)).To(Succeed())
+			Expect(*statefulSet.Spec.Replicas).To(Equal(int32(1)))
+			Expect(statefulSet.Spec.Template.Spec.Containers).To(HaveLen(1)) // No sidecar in subprocess mode
+			Expect(statefulSet.Spec.Template.Spec.Containers[0].Name).To(Equal(containerNameSuperLink))
+			Expect(statefulSet.Spec.Template.Spec.Containers[0].Image).To(Equal("flwr/superlink:1.26.0"))
+			Expect(statefulSet.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--insecure"))
+			Expect(statefulSet.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--isolation=subprocess"))
 
 			By("Checking SuperLink Service was created")
 			service := &corev1.Service{}
@@ -134,7 +134,7 @@ var _ = Describe("Federation Controller", func() {
 			Expect(daemonSet.Spec.Template.Spec.Containers[0].Args).To(ContainElement(fmt.Sprintf("--superlink=%s-superlink:9092", federationName)))
 
 			By("Checking labels are correct")
-			Expect(deployment.Labels["app.kubernetes.io/managed-by"]).To(Equal("flower-operator"))
+			Expect(statefulSet.Labels["app.kubernetes.io/managed-by"]).To(Equal("flower-operator"))
 			Expect(daemonSet.Labels["flower.flwr.ai/pool"]).To(Equal("default"))
 		})
 
@@ -277,18 +277,18 @@ var _ = Describe("Federation Controller", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Checking SuperLink Deployment has SuperExec sidecar")
-			deployment := &appsv1.Deployment{}
+			By("Checking SuperLink StatefulSet has SuperExec sidecar")
+			statefulSet := &appsv1.StatefulSet{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name:      fmt.Sprintf("%s-process-superlink", federationName),
 				Namespace: federationNamespace,
-			}, deployment)).To(Succeed())
-			Expect(deployment.Spec.Template.Spec.Containers).To(HaveLen(2))
+			}, statefulSet)).To(Succeed())
+			Expect(statefulSet.Spec.Template.Spec.Containers).To(HaveLen(2))
 
 			var superexecContainer *corev1.Container
-			for i := range deployment.Spec.Template.Spec.Containers {
-				if deployment.Spec.Template.Spec.Containers[i].Name == containerNameSuperExecServerApp {
-					superexecContainer = &deployment.Spec.Template.Spec.Containers[i]
+			for i := range statefulSet.Spec.Template.Spec.Containers {
+				if statefulSet.Spec.Template.Spec.Containers[i].Name == containerNameSuperExecServerApp {
+					superexecContainer = &statefulSet.Spec.Template.Spec.Containers[i]
 					break
 				}
 			}
@@ -298,9 +298,9 @@ var _ = Describe("Federation Controller", func() {
 
 			By("Checking SuperLink container has process isolation args")
 			var superlinkContainer *corev1.Container
-			for i := range deployment.Spec.Template.Spec.Containers {
-				if deployment.Spec.Template.Spec.Containers[i].Name == containerNameSuperLink {
-					superlinkContainer = &deployment.Spec.Template.Spec.Containers[i]
+			for i := range statefulSet.Spec.Template.Spec.Containers {
+				if statefulSet.Spec.Template.Spec.Containers[i].Name == containerNameSuperLink {
+					superlinkContainer = &statefulSet.Spec.Template.Spec.Containers[i]
 					break
 				}
 			}
@@ -773,15 +773,15 @@ var _ = Describe("Federation Controller", func() {
 			fed := &federationv1.Federation{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: federationName + "-owner", Namespace: federationNamespace}, fed)).To(Succeed())
 
-			By("Checking Deployment has owner reference")
-			deployment := &appsv1.Deployment{}
+			By("Checking StatefulSet has owner reference")
+			statefulSet := &appsv1.StatefulSet{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name:      fmt.Sprintf("%s-owner-superlink", federationName),
 				Namespace: federationNamespace,
-			}, deployment)).To(Succeed())
-			Expect(deployment.OwnerReferences).To(HaveLen(1))
-			Expect(deployment.OwnerReferences[0].UID).To(Equal(fed.UID))
-			Expect(deployment.OwnerReferences[0].Kind).To(Equal("Federation"))
+			}, statefulSet)).To(Succeed())
+			Expect(statefulSet.OwnerReferences).To(HaveLen(1))
+			Expect(statefulSet.OwnerReferences[0].UID).To(Equal(fed.UID))
+			Expect(statefulSet.OwnerReferences[0].Kind).To(Equal("Federation"))
 
 			By("Checking Service has owner reference")
 			service := &corev1.Service{}
@@ -1082,13 +1082,13 @@ var _ = Describe("Federation Controller", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Checking SuperLink Deployment has --insecure flag")
-			deployment := &appsv1.Deployment{}
+			By("Checking SuperLink StatefulSet has --insecure flag")
+			statefulSet := &appsv1.StatefulSet{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name:      fmt.Sprintf("%s-insecure-default-superlink", federationName),
 				Namespace: federationNamespace,
-			}, deployment)).To(Succeed())
-			Expect(deployment.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--insecure"))
+			}, statefulSet)).To(Succeed())
+			Expect(statefulSet.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--insecure"))
 
 			By("Checking SuperNode DaemonSet has --insecure flag")
 			daemonSet := &appsv1.DaemonSet{}
@@ -1132,13 +1132,13 @@ var _ = Describe("Federation Controller", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Checking SuperLink Deployment has --insecure flag")
-			deployment := &appsv1.Deployment{}
+			By("Checking SuperLink StatefulSet has --insecure flag")
+			statefulSet := &appsv1.StatefulSet{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name:      fmt.Sprintf("%s-insecure-true-superlink", federationName),
 				Namespace: federationNamespace,
-			}, deployment)).To(Succeed())
-			Expect(deployment.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--insecure"))
+			}, statefulSet)).To(Succeed())
+			Expect(statefulSet.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--insecure"))
 
 			By("Checking SuperNode DaemonSet has --insecure flag")
 			daemonSet := &appsv1.DaemonSet{}
@@ -1182,13 +1182,13 @@ var _ = Describe("Federation Controller", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Checking SuperLink Deployment does NOT have --insecure flag")
-			deployment := &appsv1.Deployment{}
+			By("Checking SuperLink StatefulSet does NOT have --insecure flag")
+			statefulSet := &appsv1.StatefulSet{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name:      fmt.Sprintf("%s-insecure-false-superlink", federationName),
 				Namespace: federationNamespace,
-			}, deployment)).To(Succeed())
-			Expect(deployment.Spec.Template.Spec.Containers[0].Args).NotTo(ContainElement("--insecure"))
+			}, statefulSet)).To(Succeed())
+			Expect(statefulSet.Spec.Template.Spec.Containers[0].Args).NotTo(ContainElement("--insecure"))
 
 			By("Checking SuperNode DaemonSet does NOT have --insecure flag")
 			daemonSet := &appsv1.DaemonSet{}
@@ -1239,16 +1239,16 @@ var _ = Describe("Federation Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Checking SuperExec ServerApp sidecar does NOT have --insecure flag")
-			deployment := &appsv1.Deployment{}
+			statefulSet := &appsv1.StatefulSet{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name:      fmt.Sprintf("%s-insecure-false-process-superlink", federationName),
 				Namespace: federationNamespace,
-			}, deployment)).To(Succeed())
+			}, statefulSet)).To(Succeed())
 
 			var superexecServerApp *corev1.Container
-			for i := range deployment.Spec.Template.Spec.Containers {
-				if deployment.Spec.Template.Spec.Containers[i].Name == containerNameSuperExecServerApp {
-					superexecServerApp = &deployment.Spec.Template.Spec.Containers[i]
+			for i := range statefulSet.Spec.Template.Spec.Containers {
+				if statefulSet.Spec.Template.Spec.Containers[i].Name == containerNameSuperExecServerApp {
+					superexecServerApp = &statefulSet.Spec.Template.Spec.Containers[i]
 					break
 				}
 			}
@@ -1851,15 +1851,15 @@ var _ = Describe("Federation Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Checking SuperLink container resources")
-			deployment := &appsv1.Deployment{}
+			statefulSet := &appsv1.StatefulSet{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name:      fmt.Sprintf("%s-resources-superlink", federationName),
 				Namespace: federationNamespace,
-			}, deployment)).To(Succeed())
+			}, statefulSet)).To(Succeed())
 
 			var superlinkContainer, superexecServerAppContainer *corev1.Container
-			for i := range deployment.Spec.Template.Spec.Containers {
-				c := &deployment.Spec.Template.Spec.Containers[i]
+			for i := range statefulSet.Spec.Template.Spec.Containers {
+				c := &statefulSet.Spec.Template.Spec.Containers[i]
 				switch c.Name {
 				case containerNameSuperLink:
 					superlinkContainer = c
@@ -2202,13 +2202,13 @@ var _ = Describe("Federation Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying PodSpec fields were merged")
-			deployment := &appsv1.Deployment{}
+			statefulSet := &appsv1.StatefulSet{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name:      fmt.Sprintf("%s-merge-pod-superlink", federationName),
 				Namespace: federationNamespace,
-			}, deployment)).To(Succeed())
+			}, statefulSet)).To(Succeed())
 
-			podSpec := deployment.Spec.Template.Spec
+			podSpec := statefulSet.Spec.Template.Spec
 			Expect(podSpec.PriorityClassName).To(Equal("high-priority"))
 			Expect(podSpec.RuntimeClassName).NotTo(BeNil())
 			Expect(*podSpec.RuntimeClassName).To(Equal("nvidia"))
@@ -2301,13 +2301,13 @@ var _ = Describe("Federation Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying volumes were added")
-			deployment := &appsv1.Deployment{}
+			statefulSet := &appsv1.StatefulSet{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name:      fmt.Sprintf("%s-merge-vols-superlink", federationName),
 				Namespace: federationNamespace,
-			}, deployment)).To(Succeed())
+			}, statefulSet)).To(Succeed())
 
-			podSpec := deployment.Spec.Template.Spec
+			podSpec := statefulSet.Spec.Template.Spec
 			Expect(podSpec.Volumes).To(HaveLen(2))
 
 			volumeNames := make([]string, len(podSpec.Volumes))
@@ -2377,16 +2377,16 @@ var _ = Describe("Federation Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying SuperLink container does not have --insecure flag")
-			deployment := &appsv1.Deployment{}
+			statefulSet := &appsv1.StatefulSet{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name:      fmt.Sprintf("%s-secure-superlink", federationName),
 				Namespace: federationNamespace,
-			}, deployment)).To(Succeed())
+			}, statefulSet)).To(Succeed())
 
 			var superlinkContainer *corev1.Container
-			for i := range deployment.Spec.Template.Spec.Containers {
-				if deployment.Spec.Template.Spec.Containers[i].Name == containerNameSuperLink {
-					superlinkContainer = &deployment.Spec.Template.Spec.Containers[i]
+			for i := range statefulSet.Spec.Template.Spec.Containers {
+				if statefulSet.Spec.Template.Spec.Containers[i].Name == containerNameSuperLink {
+					superlinkContainer = &statefulSet.Spec.Template.Spec.Containers[i]
 					break
 				}
 			}
@@ -2578,7 +2578,7 @@ var _ = Describe("Federation Controller", func() {
 		})
 	})
 
-	Context("Deployment update path", func() {
+	Context("SuperLink StatefulSet update path", func() {
 		var federation *federationv1.Federation
 
 		BeforeEach(func() {
@@ -2614,7 +2614,7 @@ var _ = Describe("Federation Controller", func() {
 			}
 		})
 
-		It("should update Deployment when image changes", func() {
+		It("should update StatefulSet when image changes", func() {
 			By("Reconciling to create initial resources")
 			reconciler := &FederationReconciler{
 				Client: k8sClient,
@@ -2627,12 +2627,12 @@ var _ = Describe("Federation Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying initial image")
-			deployment := &appsv1.Deployment{}
+			statefulSet := &appsv1.StatefulSet{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name:      fmt.Sprintf("%s-dep-update-superlink", federationName),
 				Namespace: federationNamespace,
-			}, deployment)).To(Succeed())
-			Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(Equal("flwr/superlink:1.26.0"))
+			}, statefulSet)).To(Succeed())
+			Expect(statefulSet.Spec.Template.Spec.Containers[0].Image).To(Equal("flwr/superlink:1.26.0"))
 
 			By("Updating Federation spec with new image")
 			fed := &federationv1.Federation{}
@@ -2647,12 +2647,12 @@ var _ = Describe("Federation Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying image was updated")
-			updatedDeployment := &appsv1.Deployment{}
+			updatedStatefulSet := &appsv1.StatefulSet{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name:      fmt.Sprintf("%s-dep-update-superlink", federationName),
 				Namespace: federationNamespace,
-			}, updatedDeployment)).To(Succeed())
-			Expect(updatedDeployment.Spec.Template.Spec.Containers[0].Image).To(Equal("flwr/superlink:1.27.0"))
+			}, updatedStatefulSet)).To(Succeed())
+			Expect(updatedStatefulSet.Spec.Template.Spec.Containers[0].Image).To(Equal("flwr/superlink:1.27.0"))
 		})
 	})
 
@@ -2934,15 +2934,15 @@ var _ = Describe("Federation Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Checking SuperLink container has env vars")
-			deployment := &appsv1.Deployment{}
+			statefulSet := &appsv1.StatefulSet{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name:      fmt.Sprintf("%s-env-superlink-superlink", federationName),
 				Namespace: federationNamespace,
-			}, deployment)).To(Succeed())
+			}, statefulSet)).To(Succeed())
 
 			var superlinkContainer, superexecServerAppContainer *corev1.Container
-			for i := range deployment.Spec.Template.Spec.Containers {
-				c := &deployment.Spec.Template.Spec.Containers[i]
+			for i := range statefulSet.Spec.Template.Spec.Containers {
+				c := &statefulSet.Spec.Template.Spec.Containers[i]
 				switch c.Name {
 				case containerNameSuperLink:
 					superlinkContainer = c
@@ -3302,16 +3302,16 @@ var _ = Describe("Federation Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying SuperLink container has extra args appended")
-			deployment := &appsv1.Deployment{}
+			statefulSet := &appsv1.StatefulSet{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name:      fmt.Sprintf("%s-extra-args-sl-superlink", federationName),
 				Namespace: federationNamespace,
-			}, deployment)).To(Succeed())
+			}, statefulSet)).To(Succeed())
 
 			var superlinkContainer *corev1.Container
-			for i := range deployment.Spec.Template.Spec.Containers {
-				if deployment.Spec.Template.Spec.Containers[i].Name == containerNameSuperLink {
-					superlinkContainer = &deployment.Spec.Template.Spec.Containers[i]
+			for i := range statefulSet.Spec.Template.Spec.Containers {
+				if statefulSet.Spec.Template.Spec.Containers[i].Name == containerNameSuperLink {
+					superlinkContainer = &statefulSet.Spec.Template.Spec.Containers[i]
 					break
 				}
 			}

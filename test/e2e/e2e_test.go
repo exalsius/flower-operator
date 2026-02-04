@@ -309,14 +309,14 @@ var _ = Describe("Manager", Ordered, func() {
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("verifying SuperLink Deployment is created")
-			verifyDeployment := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "deployment",
+			By("verifying SuperLink StatefulSet is created")
+			verifyStatefulSet := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "statefulset",
 					"federation-daemonset-subprocess-superlink", "-n", federationTestNamespace)
 				_, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
 			}
-			Eventually(verifyDeployment, 2*time.Minute, time.Second).Should(Succeed())
+			Eventually(verifyStatefulSet, 2*time.Minute, time.Second).Should(Succeed())
 
 			By("verifying SuperLink Service is created")
 			cmd = exec.Command("kubectl", "get", "service",
@@ -355,18 +355,18 @@ var _ = Describe("Manager", Ordered, func() {
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("verifying SuperLink Deployment is created")
-			verifyDeployment := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "deployment",
+			By("verifying SuperLink StatefulSet is created")
+			verifyStatefulSet := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "statefulset",
 					"federation-daemonset-process-superlink", "-n", federationTestNamespace)
 				_, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
 			}
-			Eventually(verifyDeployment, 2*time.Minute, time.Second).Should(Succeed())
+			Eventually(verifyStatefulSet, 2*time.Minute, time.Second).Should(Succeed())
 
-			By("verifying SuperLink Deployment has 2 containers (superlink + superexec-serverapp)")
+			By("verifying SuperLink StatefulSet has 2 containers (superlink + superexec-serverapp)")
 			verifySuperlinkContainers := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "deployment",
+				cmd := exec.Command("kubectl", "get", "statefulset",
 					"federation-daemonset-process-superlink", "-n", federationTestNamespace,
 					"-o", "jsonpath={.spec.template.spec.containers[*].name}")
 				output, err := utils.Run(cmd)
@@ -408,14 +408,14 @@ var _ = Describe("Manager", Ordered, func() {
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("verifying SuperLink Deployment is created")
-			verifyDeployment := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "deployment",
+			By("verifying SuperLink StatefulSet is created")
+			verifySuperLinkStatefulSet := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "statefulset",
 					"federation-statefulset-subprocess-superlink", "-n", federationTestNamespace)
 				_, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
 			}
-			Eventually(verifyDeployment, 2*time.Minute, time.Second).Should(Succeed())
+			Eventually(verifySuperLinkStatefulSet, 2*time.Minute, time.Second).Should(Succeed())
 
 			By("verifying SuperNode StatefulSet is created")
 			verifyStatefulSet := func(g Gomega) {
@@ -459,14 +459,14 @@ var _ = Describe("Manager", Ordered, func() {
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("verifying SuperLink Deployment is created")
-			verifyDeployment := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "deployment",
+			By("verifying SuperLink StatefulSet is created")
+			verifySuperLinkStatefulSet := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "statefulset",
 					"federation-statefulset-process-superlink", "-n", federationTestNamespace)
 				_, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
 			}
-			Eventually(verifyDeployment, 2*time.Minute, time.Second).Should(Succeed())
+			Eventually(verifySuperLinkStatefulSet, 2*time.Minute, time.Second).Should(Succeed())
 
 			By("verifying SuperNode StatefulSet is created")
 			verifyStatefulSet := func(g Gomega) {
@@ -499,14 +499,14 @@ var _ = Describe("Manager", Ordered, func() {
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("verifying SuperLink Deployment is created")
-			verifyDeployment := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "deployment",
+			By("verifying SuperLink StatefulSet is created")
+			verifyStatefulSet := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "statefulset",
 					"federation-multipools-superlink", "-n", federationTestNamespace)
 				_, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
 			}
-			Eventually(verifyDeployment, 2*time.Minute, time.Second).Should(Succeed())
+			Eventually(verifyStatefulSet, 2*time.Minute, time.Second).Should(Succeed())
 
 			By("verifying DaemonSet for pool-a is created")
 			verifyPoolA := func(g Gomega) {
@@ -546,18 +546,18 @@ var _ = Describe("Manager", Ordered, func() {
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("verifying SuperLink Deployment is created")
-			verifyDeployment := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "deployment",
+			By("verifying SuperLink StatefulSet is created")
+			verifySuperLinkStatefulSet := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "statefulset",
 					"federation-volumes-e2e-superlink", "-n", federationTestNamespace)
 				_, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
 			}
-			Eventually(verifyDeployment, 2*time.Minute, time.Second).Should(Succeed())
+			Eventually(verifySuperLinkStatefulSet, 2*time.Minute, time.Second).Should(Succeed())
 
-			By("verifying SuperLink Deployment has volumes")
+			By("verifying SuperLink StatefulSet has volumes")
 			verifySuperlinkVolumes := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "deployment",
+				cmd := exec.Command("kubectl", "get", "statefulset",
 					"federation-volumes-e2e-superlink", "-n", federationTestNamespace,
 					"-o", "jsonpath={.spec.template.spec.volumes[*].name}")
 				output, err := utils.Run(cmd)
@@ -569,7 +569,7 @@ var _ = Describe("Manager", Ordered, func() {
 
 			By("verifying SuperLink container has volumeMounts")
 			verifySuperlinkMounts := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "deployment",
+				cmd := exec.Command("kubectl", "get", "statefulset",
 					"federation-volumes-e2e-superlink", "-n", federationTestNamespace,
 					"-o", "jsonpath={.spec.template.spec.containers[?(@.name=='superlink')].volumeMounts[*].name}")
 				output, err := utils.Run(cmd)
@@ -581,7 +581,7 @@ var _ = Describe("Manager", Ordered, func() {
 
 			By("verifying SuperExec ServerApp sidecar has volumeMounts")
 			verifySuperexecServerappMounts := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "deployment",
+				cmd := exec.Command("kubectl", "get", "statefulset",
 					"federation-volumes-e2e-superlink", "-n", federationTestNamespace,
 					"-o", "jsonpath={.spec.template.spec.containers[?(@.name=='superexec-serverapp')].volumeMounts[*].name}")
 				output, err := utils.Run(cmd)
@@ -646,14 +646,14 @@ var _ = Describe("Manager", Ordered, func() {
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("verifying SuperLink Deployment is created")
-			verifyDeployment := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "deployment",
+			By("verifying SuperLink StatefulSet is created")
+			verifySuperLinkStatefulSet := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "statefulset",
 					"federation-vct-e2e-superlink", "-n", federationTestNamespace)
 				_, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
 			}
-			Eventually(verifyDeployment, 2*time.Minute, time.Second).Should(Succeed())
+			Eventually(verifySuperLinkStatefulSet, 2*time.Minute, time.Second).Should(Succeed())
 
 			By("verifying SuperNode StatefulSet is created")
 			verifyStatefulSet := func(g Gomega) {
