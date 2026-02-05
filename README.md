@@ -14,6 +14,7 @@ A Kubernetes operator for managing [Flower](https://flower.ai/) Federated Learni
 - [Isolation Modes](#isolation-modes)
 - [SuperNode Pools](#supernode-pools)
 - [GPU Configuration](#gpu-configuration)
+- [Node Configuration](#node-configuration)
 - [Configuration Reference](#configuration-reference)
 - [Examples](#examples)
 - [Usage Workflow](#usage-workflow)
@@ -585,6 +586,97 @@ supernodes:
         count: 1
 ```
 
+## Node Configuration
+
+The `nodeConfig` field allows passing key-value pairs to the `--node-config` flag on SuperNodes. This is useful for data partitioning, client identification, and other per-replica configuration.
+
+### Placeholders
+
+Values can contain placeholders that are expanded at runtime:
+
+| Placeholder | Description | StatefulSet | DaemonSet |
+|-------------|-------------|-------------|-----------|
+| `{index}` | Replica ordinal (0-based) | Yes | No |
+| `{replicas}` | Total replicas in the pool | Yes | No |
+| `{pool}` | Pool name | Yes | Yes |
+| `{node}` | Kubernetes node name | Yes | Yes |
+
+### StatefulSet with Data Partitioning
+
+In StatefulSet mode, use `{index}` and `{replicas}` to implement data partitioning:
+
+```yaml
+apiVersion: flwr.exalsius.ai/v1
+kind: Federation
+metadata:
+  name: partitioned-training
+spec:
+  mode: StatefulSet
+  isolationMode: subprocess
+
+  superlink:
+    image: flwr/superlink:1.25.0
+
+  supernodes:
+    image: my-app/client:latest
+    pools:
+      - name: default
+        replicas: 4
+        images: {}
+        nodeConfig:
+          # Each replica gets a unique partition (0, 1, 2, 3)
+          partition-id: "{index}"
+          # Total partitions matches replica count (4)
+          num-partitions: "{replicas}"
+          # Unique client name
+          name: "client_{pool}_{index}"
+```
+
+This generates pods with the following `--node-config` values:
+- Pod 0: `--node-config "name=client_default_0 num-partitions=4 partition-id=0"`
+- Pod 1: `--node-config "name=client_default_1 num-partitions=4 partition-id=1"`
+- Pod 2: `--node-config "name=client_default_2 num-partitions=4 partition-id=2"`
+- Pod 3: `--node-config "name=client_default_3 num-partitions=4 partition-id=3"`
+
+### DaemonSet with Node Identification
+
+In DaemonSet mode, use `{node}` for unique identification since `{index}` is not available:
+
+```yaml
+apiVersion: flwr.exalsius.ai/v1
+kind: Federation
+metadata:
+  name: edge-federation
+spec:
+  mode: DaemonSet
+  isolationMode: subprocess
+
+  superlink:
+    image: flwr/superlink:1.25.0
+
+  supernodes:
+    image: my-app/client:latest
+    pools:
+      - name: edge
+        images: {}
+        nodeConfig:
+          # Use Kubernetes node name for unique identification
+          name: "client_{node}"
+          node-id: "{node}"
+          pool: "{pool}"
+```
+
+### Static Configuration
+
+You can also use `nodeConfig` for static values (same for all replicas):
+
+```yaml
+nodeConfig:
+  dataset: "cifar10"
+  batch-size: "32"
+  learning-rate: "0.01"
+```
+
 ## Resource Configuration
 
 The operator supports fine-grained resource configuration for all containers in a Federation. Resource requirements help Kubernetes schedule pods appropriately and ensure fair resource allocation.
@@ -791,6 +883,7 @@ pools:
 | `podTemplate` | PodTemplateSpec | No | Pod customization |
 | `extraArgs` | []string | No | Extra command-line arguments |
 | `env` | []EnvVar | No | Environment variables (merged with defaults) |
+| `nodeConfig` | map[string]string | No | Key-value pairs for `--node-config` flag (see [Node Configuration](#node-configuration)) |
 
 ### GPUConfig
 
@@ -867,6 +960,59 @@ spec:
 - Multiple pools with different resource requirements (CPU, memory, GPU)
 - Both DaemonSet and StatefulSet modes
 - Resource configuration combined with GPU settings
+
+### Node Configuration Examples
+
+[examples/federation-nodeconfig.yaml](examples/federation-nodeconfig.yaml) - StatefulSet with data partitioning:
+
+```yaml
+apiVersion: flwr.exalsius.ai/v1
+kind: Federation
+metadata:
+  name: federation-nodeconfig
+spec:
+  mode: StatefulSet
+  isolationMode: subprocess
+
+  superlink:
+    image: flwr/superlink:1.25.0
+
+  supernodes:
+    image: flwr/supernode:1.25.0
+    pools:
+      - name: default
+        replicas: 4
+        images: {}
+        nodeConfig:
+          partition-id: "{index}"
+          num-partitions: "{replicas}"
+          name: "client_{pool}_{index}"
+```
+
+[examples/federation-nodeconfig-daemonset.yaml](examples/federation-nodeconfig-daemonset.yaml) - DaemonSet with node identification:
+
+```yaml
+apiVersion: flwr.exalsius.ai/v1
+kind: Federation
+metadata:
+  name: federation-nodeconfig-daemonset
+spec:
+  mode: DaemonSet
+  isolationMode: subprocess
+
+  superlink:
+    image: flwr/superlink:1.25.0
+
+  supernodes:
+    image: flwr/supernode:1.25.0
+    pools:
+      - name: edge
+        images: {}
+        nodeConfig:
+          name: "client_{node}"
+          node-id: "{node}"
+          pool: "{pool}"
+```
 
 
 ## Usage Workflow

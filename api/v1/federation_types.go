@@ -312,6 +312,16 @@ type SuperNodePoolSpec struct {
 	// Only used when spec.mode is StatefulSet; ignored for DaemonSet mode.
 	// +kubebuilder:validation:Optional
 	VolumeClaimTemplates []PersistentVolumeClaimTemplate `json:"volumeClaimTemplates,omitempty"`
+
+	// NodeConfig specifies key-value pairs for the --node-config flag on supernodes.
+	// Values can contain placeholders that are expanded at runtime:
+	// - {index}: Replica ordinal (0-based, StatefulSet only)
+	// - {replicas}: Total replicas in this pool (StatefulSet only)
+	// - {pool}: Pool name
+	// - {node}: Kubernetes node name
+	// Example: {"partition-id": "{index}", "num-partitions": "{replicas}"}
+	// +kubebuilder:validation:Optional
+	NodeConfig map[string]string `json:"nodeConfig,omitempty"`
 }
 
 // PersistentVolumeClaimTemplate defines a PVC template for StatefulSet volumeClaimTemplates

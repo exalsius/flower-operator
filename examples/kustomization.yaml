@@ -6,3 +6,5 @@ resources:
 - federation-statefulset-subprocess.yaml
 - federation-statefulset-process.yaml
 - federation-multipools.yaml
+- federation-nodeconfig.yaml
+- federation-nodeconfig-daemonset.yaml

@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -88,6 +90,14 @@ func (r *FederationReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 		logger.Error(err, "unable to fetch Federation")
 		return ctrl.Result{}, err
+	}
+
+	// Validate nodeConfig placeholders for mode compatibility
+	for _, pool := range federation.Spec.SuperNodes.Pools {
+		if err := validateNodeConfigForMode(pool.NodeConfig, federation.Spec.Mode, pool.Name); err != nil {
+			logger.Error(err, "invalid nodeConfig", "pool", pool.Name)
+			return ctrl.Result{}, err
+		}
 	}
 
 	superLinkStatefulSet, err := r.reconcileSuperLinkStatefulSet(ctx, federation)
@@ -439,20 +449,20 @@ func (r *FederationReconciler) buildSuperNodeContainer(federation *federationv1.
 	}
 
 	superLinkService := fmt.Sprintf("%s-superlink", federation.Name)
-	args := []string{
+	baseArgs := []string{
 		fmt.Sprintf("--superlink=%s:%d", superLinkService, portFleetAPI),
 		fmt.Sprintf("--isolation=%s", federation.Spec.IsolationMode),
 	}
 	if isInsecure(federation) {
-		args = append(args, "--insecure")
+		baseArgs = append(baseArgs, "--insecure")
 	}
 
 	// Add ClientAppIO address in process mode
 	if federation.Spec.IsolationMode == federationv1.IsolationModeProcess {
-		args = append(args, fmt.Sprintf("--clientappio-api-address=0.0.0.0:%d", portClientAppIO))
+		baseArgs = append(baseArgs, fmt.Sprintf("--clientappio-api-address=0.0.0.0:%d", portClientAppIO))
 	}
 
-	args = append(args, pool.ExtraArgs...)
+	baseArgs = append(baseArgs, pool.ExtraArgs...)
 
 	ports := []corev1.ContainerPort{
 		{Name: "clientappio", ContainerPort: portClientAppIO, Protocol: corev1.ProtocolTCP},
@@ -485,14 +495,71 @@ func (r *FederationReconciler) buildSuperNodeContainer(federation *federationv1.
 		envVars = append(envVars, *gpuEnv)
 	}
 
+	// Add downward API env vars when nodeConfig uses dynamic placeholders
+	if len(pool.NodeConfig) > 0 && nodeConfigNeedsDynamicExpansion(pool.NodeConfig) {
+		envVars = append(envVars,
+			corev1.EnvVar{
+				Name: "POD_NAME",
+				ValueFrom: &corev1.EnvVarSource{
+					FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"},
+				},
+			},
+			corev1.EnvVar{
+				Name: "FLOWER_NODE_NAME",
+				ValueFrom: &corev1.EnvVarSource{
+					FieldRef: &corev1.ObjectFieldSelector{FieldPath: "spec.nodeName"},
+				},
+			},
+		)
+	}
+
 	container := corev1.Container{
 		Name:         "supernode",
 		Image:        image,
-		Args:         args,
 		Ports:        ports,
 		Resources:    *resources,
 		Env:          envVars,
 		VolumeMounts: mergeVolumeMounts(pool.VolumeMounts, getMountAllGPUVolumeMounts(pool.GPU)),
+	}
+
+	// Build command/args based on whether nodeConfig is specified
+	if len(pool.NodeConfig) > 0 {
+		// Get replicas count for {replicas} placeholder expansion
+		replicas := int32(1)
+		if pool.Replicas != nil {
+			replicas = *pool.Replicas
+		}
+
+		nodeConfigStr := buildNodeConfigString(pool.NodeConfig, replicas, pool.Name, federation.Spec.Mode)
+
+		if nodeConfigNeedsDynamicExpansion(pool.NodeConfig) {
+			// Use shell wrapper to extract index from POD_NAME and expand env vars
+			var shellScript string
+			if federation.Spec.Mode == federationv1.DeploymentModeStatefulSet {
+				// StatefulSet: extract ordinal from pod name (e.g., fed-supernode-pool-0 -> 0)
+				shellScript = fmt.Sprintf(
+					`export FLOWER_INDEX=$(echo $POD_NAME | rev | cut -d- -f1 | rev) && exec flower-supernode %s --node-config "%s"`,
+					strings.Join(baseArgs, " "),
+					nodeConfigStr,
+				)
+			} else {
+				// DaemonSet: no index extraction needed, just expand env vars
+				shellScript = fmt.Sprintf(
+					`exec flower-supernode %s --node-config "%s"`,
+					strings.Join(baseArgs, " "),
+					nodeConfigStr,
+				)
+			}
+			container.Command = []string{"sh", "-c"}
+			container.Args = []string{shellScript}
+		} else {
+			// No dynamic expansion needed, use direct args
+			args := append(baseArgs, fmt.Sprintf("--node-config=%s", nodeConfigStr))
+			container.Args = args
+		}
+	} else {
+		// No nodeConfig, use standard args
+		container.Args = baseArgs
 	}
 
 	// Set security context for AMD GPU access
@@ -1199,4 +1266,64 @@ func (r *FederationReconciler) mergePodSpec(base, override corev1.PodSpec) corev
 	}
 
 	return base
+}
+
+// nodeConfigNeedsDynamicExpansion checks if the nodeConfig uses placeholders
+// that require runtime expansion (env var substitution).
+func nodeConfigNeedsDynamicExpansion(nodeConfig map[string]string) bool {
+	for _, v := range nodeConfig {
+		if strings.Contains(v, "{index}") ||
+			strings.Contains(v, "{replicas}") ||
+			strings.Contains(v, "{node}") {
+			return true
+		}
+	}
+	return false
+}
+
+// validateNodeConfigForMode checks if nodeConfig placeholders are compatible with the deployment mode.
+// Returns an error if {index} or {replicas} are used in DaemonSet mode.
+func validateNodeConfigForMode(nodeConfig map[string]string, mode federationv1.DeploymentMode, poolName string) error {
+	if mode != federationv1.DeploymentModeDaemonSet {
+		return nil
+	}
+	for k, v := range nodeConfig {
+		if strings.Contains(v, "{index}") || strings.Contains(v, "{replicas}") {
+			return fmt.Errorf("pool %q nodeConfig key %q uses {index} or {replicas} which are not supported in DaemonSet mode; use {node} or {pool} instead", poolName, k)
+		}
+	}
+	return nil
+}
+
+// buildNodeConfigString builds the --node-config argument string.
+// For StatefulSet mode, {index} and {replicas} are converted to shell variable references.
+// For DaemonSet mode, only {pool} and {node} are supported.
+// The {pool} placeholder is expanded at build time, others at runtime.
+func buildNodeConfigString(nodeConfig map[string]string, replicas int32, poolName string, mode federationv1.DeploymentMode) string {
+	// Collect and sort keys for deterministic output
+	keys := make([]string, 0, len(nodeConfig))
+	for k := range nodeConfig {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		v := nodeConfig[k]
+
+		// Replace static placeholders at build time
+		v = strings.ReplaceAll(v, "{pool}", poolName)
+
+		// StatefulSet-only placeholders - convert to env var references
+		if mode == federationv1.DeploymentModeStatefulSet {
+			v = strings.ReplaceAll(v, "{replicas}", strconv.Itoa(int(replicas)))
+			v = strings.ReplaceAll(v, "{index}", "$FLOWER_INDEX")
+		}
+
+		// Convert {node} to env var reference for runtime expansion
+		v = strings.ReplaceAll(v, "{node}", "$FLOWER_NODE_NAME")
+
+		parts = append(parts, fmt.Sprintf("%s=%s", k, v))
+	}
+	return strings.Join(parts, " ")
 }

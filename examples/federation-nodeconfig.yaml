@@ -1,0 +1,33 @@
+apiVersion: flwr.exalsius.ai/v1
+kind: Federation
+metadata:
+  name: federation-nodeconfig
+spec:
+  # StatefulSet mode: each replica gets a unique index (0, 1, 2, ...)
+  mode: StatefulSet
+  isolationMode: subprocess
+
+  superlink:
+    image: flwr/superlink:1.25.0
+    service:
+      type: ClusterIP
+
+  supernodes:
+    image: flwr/supernode:1.25.0
+    pools:
+      - name: default
+        replicas: 4
+        images: {}
+        # nodeConfig passes key-value pairs to the --node-config flag
+        # Placeholders are expanded at runtime:
+        #   {index}    - Replica ordinal (0-based, StatefulSet only)
+        #   {replicas} - Total replicas in this pool (StatefulSet only)
+        #   {pool}     - Pool name
+        #   {node}     - Kubernetes node name
+        nodeConfig:
+          # Each replica gets a unique partition
+          partition-id: "{index}"
+          # Total number of partitions matches replicas
+          num-partitions: "{replicas}"
+          # Unique client name combining pool and index
+          name: "client_{pool}_{index}"

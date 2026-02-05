@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -3717,6 +3718,354 @@ var _ = Describe("Federation Controller", func() {
 			Expect(gpuLimit.Equal(resource.MustParse("4"))).To(BeTrue())
 			gpuRequest := superexecContainer.Resources.Requests[corev1.ResourceName("nvidia.com/gpu")]
 			Expect(gpuRequest.Equal(resource.MustParse("4"))).To(BeTrue())
+		})
+	})
+
+	Context("NodeConfig support", func() {
+		var federation *federationv1.Federation
+
+		Context("StatefulSet with nodeConfig", func() {
+			BeforeEach(func() {
+				replicas := int32(4)
+				federation = &federationv1.Federation{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      federationName + "-nodeconfig-sts",
+						Namespace: federationNamespace,
+					},
+					Spec: federationv1.FederationSpec{
+						Mode:          federationv1.DeploymentModeStatefulSet,
+						IsolationMode: federationv1.IsolationModeSubprocess,
+						SuperLink: federationv1.SuperLinkSpec{
+							Image: "flwr/superlink:1.26.0",
+						},
+						SuperNodes: federationv1.SuperNodesSpec{
+							Image: "flwr/supernode:1.26.0",
+							Pools: []federationv1.SuperNodePoolSpec{
+								{
+									Name:     "gpu-pool",
+									Replicas: &replicas,
+									Images:   federationv1.PoolImages{},
+									NodeConfig: map[string]string{
+										"partition-id":   "{index}",
+										"num-partitions": "{replicas}",
+										"name":           "client_{pool}_{index}",
+									},
+								},
+							},
+						},
+					},
+				}
+				Expect(k8sClient.Create(ctx, federation)).To(Succeed())
+			})
+
+			AfterEach(func() {
+				fed := &federationv1.Federation{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: federationName + "-nodeconfig-sts", Namespace: federationNamespace}, fed); err == nil {
+					Expect(k8sClient.Delete(ctx, fed)).To(Succeed())
+				}
+			})
+
+			It("should use shell wrapper with index extraction for StatefulSet nodeConfig", func() {
+				By("Reconciling the Federation")
+				reconciler := &FederationReconciler{
+					Client: k8sClient,
+					Scheme: k8sClient.Scheme(),
+				}
+
+				_, err := reconciler.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: federationName + "-nodeconfig-sts", Namespace: federationNamespace},
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				By("Checking StatefulSet supernode container")
+				statefulSet := &appsv1.StatefulSet{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      fmt.Sprintf("%s-nodeconfig-sts-supernode-gpu-pool", federationName),
+					Namespace: federationNamespace,
+				}, statefulSet)).To(Succeed())
+
+				var supernodeContainer *corev1.Container
+				for i := range statefulSet.Spec.Template.Spec.Containers {
+					if statefulSet.Spec.Template.Spec.Containers[i].Name == containerNameSuperNode {
+						supernodeContainer = &statefulSet.Spec.Template.Spec.Containers[i]
+						break
+					}
+				}
+				Expect(supernodeContainer).NotTo(BeNil())
+
+				By("Verifying shell command is used")
+				Expect(supernodeContainer.Command).To(Equal([]string{"sh", "-c"}))
+				Expect(supernodeContainer.Args).To(HaveLen(1))
+
+				shellScript := supernodeContainer.Args[0]
+				By("Verifying shell script extracts FLOWER_INDEX from POD_NAME")
+				Expect(shellScript).To(ContainSubstring("export FLOWER_INDEX=$(echo $POD_NAME | rev | cut -d- -f1 | rev)"))
+
+				By("Verifying shell script includes --node-config with placeholders")
+				Expect(shellScript).To(ContainSubstring("--node-config"))
+				Expect(shellScript).To(ContainSubstring("partition-id=$FLOWER_INDEX"))
+				Expect(shellScript).To(ContainSubstring("num-partitions=4")) // {replicas} expanded to 4
+				Expect(shellScript).To(ContainSubstring("name=client_gpu-pool_$FLOWER_INDEX"))
+
+				By("Verifying downward API env vars are injected")
+				var podNameEnv, nodeNameEnv *corev1.EnvVar
+				for i := range supernodeContainer.Env {
+					switch supernodeContainer.Env[i].Name {
+					case "POD_NAME":
+						podNameEnv = &supernodeContainer.Env[i]
+					case "FLOWER_NODE_NAME":
+						nodeNameEnv = &supernodeContainer.Env[i]
+					}
+				}
+				Expect(podNameEnv).NotTo(BeNil())
+				Expect(podNameEnv.ValueFrom).NotTo(BeNil())
+				Expect(podNameEnv.ValueFrom.FieldRef.FieldPath).To(Equal("metadata.name"))
+
+				Expect(nodeNameEnv).NotTo(BeNil())
+				Expect(nodeNameEnv.ValueFrom).NotTo(BeNil())
+				Expect(nodeNameEnv.ValueFrom.FieldRef.FieldPath).To(Equal("spec.nodeName"))
+			})
+		})
+
+		Context("DaemonSet with nodeConfig (node placeholder)", func() {
+			BeforeEach(func() {
+				federation = &federationv1.Federation{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      federationName + "-nodeconfig-ds",
+						Namespace: federationNamespace,
+					},
+					Spec: federationv1.FederationSpec{
+						Mode:          federationv1.DeploymentModeDaemonSet,
+						IsolationMode: federationv1.IsolationModeSubprocess,
+						SuperLink: federationv1.SuperLinkSpec{
+							Image: "flwr/superlink:1.26.0",
+						},
+						SuperNodes: federationv1.SuperNodesSpec{
+							Image: "flwr/supernode:1.26.0",
+							Pools: []federationv1.SuperNodePoolSpec{
+								{
+									Name:   "edge",
+									Images: federationv1.PoolImages{},
+									NodeConfig: map[string]string{
+										"name":    "client_{node}",
+										"node-id": "{node}",
+										"pool":    "{pool}",
+									},
+								},
+							},
+						},
+					},
+				}
+				Expect(k8sClient.Create(ctx, federation)).To(Succeed())
+			})
+
+			AfterEach(func() {
+				fed := &federationv1.Federation{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: federationName + "-nodeconfig-ds", Namespace: federationNamespace}, fed); err == nil {
+					Expect(k8sClient.Delete(ctx, fed)).To(Succeed())
+				}
+			})
+
+			It("should use shell wrapper with node name for DaemonSet nodeConfig", func() {
+				By("Reconciling the Federation")
+				reconciler := &FederationReconciler{
+					Client: k8sClient,
+					Scheme: k8sClient.Scheme(),
+				}
+
+				_, err := reconciler.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: federationName + "-nodeconfig-ds", Namespace: federationNamespace},
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				By("Checking DaemonSet supernode container")
+				daemonSet := &appsv1.DaemonSet{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      fmt.Sprintf("%s-nodeconfig-ds-supernode-edge", federationName),
+					Namespace: federationNamespace,
+				}, daemonSet)).To(Succeed())
+
+				var supernodeContainer *corev1.Container
+				for i := range daemonSet.Spec.Template.Spec.Containers {
+					if daemonSet.Spec.Template.Spec.Containers[i].Name == containerNameSuperNode {
+						supernodeContainer = &daemonSet.Spec.Template.Spec.Containers[i]
+						break
+					}
+				}
+				Expect(supernodeContainer).NotTo(BeNil())
+
+				By("Verifying shell command is used")
+				Expect(supernodeContainer.Command).To(Equal([]string{"sh", "-c"}))
+				Expect(supernodeContainer.Args).To(HaveLen(1))
+
+				shellScript := supernodeContainer.Args[0]
+				By("Verifying shell script does NOT extract FLOWER_INDEX (DaemonSet)")
+				Expect(shellScript).NotTo(ContainSubstring("FLOWER_INDEX"))
+
+				By("Verifying shell script includes --node-config with node placeholder")
+				Expect(shellScript).To(ContainSubstring("--node-config"))
+				Expect(shellScript).To(ContainSubstring("name=client_$FLOWER_NODE_NAME"))
+				Expect(shellScript).To(ContainSubstring("node-id=$FLOWER_NODE_NAME"))
+				Expect(shellScript).To(ContainSubstring("pool=edge")) // {pool} expanded at build time
+
+				By("Verifying downward API env vars are injected")
+				var nodeNameEnv *corev1.EnvVar
+				for i := range supernodeContainer.Env {
+					if supernodeContainer.Env[i].Name == "FLOWER_NODE_NAME" {
+						nodeNameEnv = &supernodeContainer.Env[i]
+						break
+					}
+				}
+				Expect(nodeNameEnv).NotTo(BeNil())
+				Expect(nodeNameEnv.ValueFrom).NotTo(BeNil())
+				Expect(nodeNameEnv.ValueFrom.FieldRef.FieldPath).To(Equal("spec.nodeName"))
+			})
+		})
+
+		Context("Static nodeConfig (no dynamic placeholders)", func() {
+			BeforeEach(func() {
+				replicas := int32(2)
+				federation = &federationv1.Federation{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      federationName + "-nodeconfig-static",
+						Namespace: federationNamespace,
+					},
+					Spec: federationv1.FederationSpec{
+						Mode:          federationv1.DeploymentModeStatefulSet,
+						IsolationMode: federationv1.IsolationModeSubprocess,
+						SuperLink: federationv1.SuperLinkSpec{
+							Image: "flwr/superlink:1.26.0",
+						},
+						SuperNodes: federationv1.SuperNodesSpec{
+							Image: "flwr/supernode:1.26.0",
+							Pools: []federationv1.SuperNodePoolSpec{
+								{
+									Name:     "static-pool",
+									Replicas: &replicas,
+									Images:   federationv1.PoolImages{},
+									NodeConfig: map[string]string{
+										"dataset":    "cifar10",
+										"batch-size": "32",
+										"pool-name":  "{pool}", // Only pool is static
+									},
+								},
+							},
+						},
+					},
+				}
+				Expect(k8sClient.Create(ctx, federation)).To(Succeed())
+			})
+
+			AfterEach(func() {
+				fed := &federationv1.Federation{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: federationName + "-nodeconfig-static", Namespace: federationNamespace}, fed); err == nil {
+					Expect(k8sClient.Delete(ctx, fed)).To(Succeed())
+				}
+			})
+
+			It("should use direct args without shell wrapper for static nodeConfig", func() {
+				By("Reconciling the Federation")
+				reconciler := &FederationReconciler{
+					Client: k8sClient,
+					Scheme: k8sClient.Scheme(),
+				}
+
+				_, err := reconciler.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: federationName + "-nodeconfig-static", Namespace: federationNamespace},
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				By("Checking StatefulSet supernode container")
+				statefulSet := &appsv1.StatefulSet{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      fmt.Sprintf("%s-nodeconfig-static-supernode-static-pool", federationName),
+					Namespace: federationNamespace,
+				}, statefulSet)).To(Succeed())
+
+				var supernodeContainer *corev1.Container
+				for i := range statefulSet.Spec.Template.Spec.Containers {
+					if statefulSet.Spec.Template.Spec.Containers[i].Name == containerNameSuperNode {
+						supernodeContainer = &statefulSet.Spec.Template.Spec.Containers[i]
+						break
+					}
+				}
+				Expect(supernodeContainer).NotTo(BeNil())
+
+				By("Verifying shell command is NOT used (static config)")
+				Expect(supernodeContainer.Command).To(BeEmpty())
+
+				By("Verifying args include --node-config with expanded values")
+				var nodeConfigArg string
+				for _, arg := range supernodeContainer.Args {
+					if strings.HasPrefix(arg, "--node-config=") {
+						nodeConfigArg = arg
+						break
+					}
+				}
+				Expect(nodeConfigArg).NotTo(BeEmpty())
+				Expect(nodeConfigArg).To(ContainSubstring("batch-size=32"))
+				Expect(nodeConfigArg).To(ContainSubstring("dataset=cifar10"))
+				Expect(nodeConfigArg).To(ContainSubstring("pool-name=static-pool")) // {pool} expanded
+
+				By("Verifying downward API env vars are NOT injected (not needed)")
+				for _, env := range supernodeContainer.Env {
+					Expect(env.Name).NotTo(Equal("POD_NAME"))
+					Expect(env.Name).NotTo(Equal("FLOWER_NODE_NAME"))
+				}
+			})
+		})
+
+		Context("Invalid nodeConfig (DaemonSet with {index} placeholder)", func() {
+			BeforeEach(func() {
+				federation = &federationv1.Federation{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      federationName + "-nodeconfig-invalid",
+						Namespace: federationNamespace,
+					},
+					Spec: federationv1.FederationSpec{
+						Mode:          federationv1.DeploymentModeDaemonSet,
+						IsolationMode: federationv1.IsolationModeSubprocess,
+						SuperLink: federationv1.SuperLinkSpec{
+							Image: "flwr/superlink:1.26.0",
+						},
+						SuperNodes: federationv1.SuperNodesSpec{
+							Image: "flwr/supernode:1.26.0",
+							Pools: []federationv1.SuperNodePoolSpec{
+								{
+									Name:   "invalid-pool",
+									Images: federationv1.PoolImages{},
+									NodeConfig: map[string]string{
+										"partition-id": "{index}", // Invalid for DaemonSet
+									},
+								},
+							},
+						},
+					},
+				}
+				Expect(k8sClient.Create(ctx, federation)).To(Succeed())
+			})
+
+			AfterEach(func() {
+				fed := &federationv1.Federation{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: federationName + "-nodeconfig-invalid", Namespace: federationNamespace}, fed); err == nil {
+					Expect(k8sClient.Delete(ctx, fed)).To(Succeed())
+				}
+			})
+
+			It("should return error when DaemonSet uses {index} placeholder", func() {
+				By("Reconciling the Federation")
+				reconciler := &FederationReconciler{
+					Client: k8sClient,
+					Scheme: k8sClient.Scheme(),
+				}
+
+				_, err := reconciler.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: federationName + "-nodeconfig-invalid", Namespace: federationNamespace},
+				})
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("{index}"))
+				Expect(err.Error()).To(ContainSubstring("not supported in DaemonSet mode"))
+			})
 		})
 	})
 })

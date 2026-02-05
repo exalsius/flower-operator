@@ -1,0 +1,29 @@
+apiVersion: flwr.exalsius.ai/v1
+kind: Federation
+metadata:
+  name: federation-nodeconfig-daemonset
+spec:
+  # DaemonSet mode: one pod per eligible node
+  mode: DaemonSet
+  isolationMode: subprocess
+
+  superlink:
+    image: flwr/superlink:1.25.0
+    service:
+      type: ClusterIP
+
+  supernodes:
+    image: flwr/supernode:1.25.0
+    pools:
+      - name: edge
+        images: {}
+        # nodeConfig for DaemonSet mode
+        # Note: {index} and {replicas} are NOT supported in DaemonSet mode
+        # Use {node} for unique identification since each pod runs on a different node
+        nodeConfig:
+          # Unique client name based on Kubernetes node
+          name: "client_{node}"
+          # Node identifier for data partitioning
+          node-id: "{node}"
+          # Pool name for grouping
+          pool: "{pool}"
