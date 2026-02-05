@@ -3803,9 +3803,9 @@ var _ = Describe("Federation Controller", func() {
 
 				By("Verifying shell script includes --node-config with placeholders")
 				Expect(shellScript).To(ContainSubstring("--node-config"))
-				Expect(shellScript).To(ContainSubstring("partition-id=$FLOWER_INDEX"))
-				Expect(shellScript).To(ContainSubstring("num-partitions=4")) // {replicas} expanded to 4
-				Expect(shellScript).To(ContainSubstring("name=client_gpu-pool_$FLOWER_INDEX"))
+				Expect(shellScript).To(ContainSubstring("partition-id=$FLOWER_INDEX"))             // pure {index} placeholder, unquoted
+				Expect(shellScript).To(ContainSubstring("num-partitions=4"))                       // {replicas} expanded to 4
+				Expect(shellScript).To(ContainSubstring(`name=\"client_gpu-pool_$FLOWER_INDEX\"`)) // string value, quoted
 
 				By("Verifying downward API env vars are injected")
 				var podNameEnv, nodeNameEnv *corev1.EnvVar
@@ -3904,9 +3904,9 @@ var _ = Describe("Federation Controller", func() {
 
 				By("Verifying shell script includes --node-config with node placeholder")
 				Expect(shellScript).To(ContainSubstring("--node-config"))
-				Expect(shellScript).To(ContainSubstring("name=client_$FLOWER_NODE_NAME"))
-				Expect(shellScript).To(ContainSubstring("node-id=$FLOWER_NODE_NAME"))
-				Expect(shellScript).To(ContainSubstring("pool=edge")) // {pool} expanded at build time
+				Expect(shellScript).To(ContainSubstring(`name=\"client_$FLOWER_NODE_NAME\"`)) // string value, quoted
+				Expect(shellScript).To(ContainSubstring(`node-id=\"$FLOWER_NODE_NAME\"`))     // string value, quoted
+				Expect(shellScript).To(ContainSubstring(`pool=\"edge\"`))                     // {pool} expanded, string quoted
 
 				By("Verifying downward API env vars are injected")
 				var nodeNameEnv *corev1.EnvVar
@@ -4003,9 +4003,9 @@ var _ = Describe("Federation Controller", func() {
 					}
 				}
 				Expect(nodeConfigArg).NotTo(BeEmpty())
-				Expect(nodeConfigArg).To(ContainSubstring("batch-size=32"))
-				Expect(nodeConfigArg).To(ContainSubstring("dataset=cifar10"))
-				Expect(nodeConfigArg).To(ContainSubstring("pool-name=static-pool")) // {pool} expanded
+				Expect(nodeConfigArg).To(ContainSubstring("batch-size=32"))           // integer, unquoted
+				Expect(nodeConfigArg).To(ContainSubstring(`dataset="cifar10"`))       // string, quoted
+				Expect(nodeConfigArg).To(ContainSubstring(`pool-name="static-pool"`)) // {pool} expanded, string quoted
 
 				By("Verifying downward API env vars are NOT injected (not needed)")
 				for _, env := range supernodeContainer.Env {
@@ -4065,6 +4065,239 @@ var _ = Describe("Federation Controller", func() {
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("{index}"))
 				Expect(err.Error()).To(ContainSubstring("not supported in DaemonSet mode"))
+			})
+		})
+	})
+
+	Context("nodeConfig TOML formatting", func() {
+		Describe("formatNodeConfigValue", func() {
+			It("should not quote integer values", func() {
+				result := formatNodeConfigValue("42", false, false)
+				Expect(result).To(Equal("42"))
+
+				result = formatNodeConfigValue("0", false, false)
+				Expect(result).To(Equal("0"))
+
+				result = formatNodeConfigValue("12345", false, false)
+				Expect(result).To(Equal("12345"))
+			})
+
+			It("should not quote boolean values", func() {
+				result := formatNodeConfigValue("true", false, false)
+				Expect(result).To(Equal("true"))
+
+				result = formatNodeConfigValue("false", false, false)
+				Expect(result).To(Equal("false"))
+			})
+
+			It("should quote string values without shell expansion", func() {
+				result := formatNodeConfigValue("cifar10", false, false)
+				Expect(result).To(Equal(`"cifar10"`))
+
+				result = formatNodeConfigValue("my-dataset", false, false)
+				Expect(result).To(Equal(`"my-dataset"`))
+			})
+
+			It("should use escaped quotes for strings with shell expansion", func() {
+				result := formatNodeConfigValue("client_$FLOWER_INDEX", true, false)
+				Expect(result).To(Equal(`\"client_$FLOWER_INDEX\"`))
+
+				result = formatNodeConfigValue("$FLOWER_NODE_NAME", true, false)
+				Expect(result).To(Equal(`\"$FLOWER_NODE_NAME\"`))
+			})
+
+			It("should not quote pure integer placeholders", func() {
+				// When isPureIntegerPlaceholder is true, value should not be quoted
+				result := formatNodeConfigValue("$FLOWER_INDEX", true, true)
+				Expect(result).To(Equal("$FLOWER_INDEX"))
+			})
+
+			It("should not quote negative integers", func() {
+				// Note: negative integers are not recognized as integers by strconv.Atoi
+				// if leading minus is not handled - this tests current behavior
+				result := formatNodeConfigValue("-1", false, false)
+				// Current implementation treats "-1" as string since Atoi handles it
+				Expect(result).To(Equal("-1"))
+			})
+		})
+
+		Describe("buildNodeConfigString", func() {
+			It("should format StatefulSet config with mixed types correctly", func() {
+				nodeConfig := map[string]string{
+					"partition-id":   "{index}",
+					"num-partitions": "4",
+					"dataset":        "cifar10",
+					"use-gpu":        "true",
+				}
+
+				result := buildNodeConfigString(nodeConfig, 4, "default", federationv1.DeploymentModeStatefulSet, true)
+
+				// Check each part (sorted alphabetically by key)
+				Expect(result).To(ContainSubstring(`dataset=\"cifar10\"`))        // string, escaped quotes
+				Expect(result).To(ContainSubstring("num-partitions=4"))           // integer, no quotes
+				Expect(result).To(ContainSubstring("partition-id=$FLOWER_INDEX")) // pure integer placeholder, no quotes
+				Expect(result).To(ContainSubstring("use-gpu=true"))               // boolean, no quotes
+			})
+
+			It("should format DaemonSet config with node placeholder correctly", func() {
+				nodeConfig := map[string]string{
+					"node-id": "{node}",
+					"pool":    "{pool}",
+					"count":   "10",
+				}
+
+				result := buildNodeConfigString(nodeConfig, 0, "edge-pool", federationv1.DeploymentModeDaemonSet, true)
+
+				Expect(result).To(ContainSubstring("count=10"))                      // integer, no quotes
+				Expect(result).To(ContainSubstring(`node-id=\"$FLOWER_NODE_NAME\"`)) // string with shell var, escaped quotes
+				Expect(result).To(ContainSubstring(`pool=\"edge-pool\"`))            // string, escaped quotes
+			})
+
+			It("should format static config without shell expansion", func() {
+				nodeConfig := map[string]string{
+					"batch-size":    "32",
+					"learning-rate": "0.01",
+					"dataset":       "mnist",
+					"distributed":   "false",
+				}
+
+				result := buildNodeConfigString(nodeConfig, 2, "static", federationv1.DeploymentModeStatefulSet, false)
+
+				Expect(result).To(ContainSubstring("batch-size=32"))        // integer, no quotes
+				Expect(result).To(ContainSubstring(`dataset="mnist"`))      // string, regular quotes
+				Expect(result).To(ContainSubstring("distributed=false"))    // boolean, no quotes
+				Expect(result).To(ContainSubstring(`learning-rate="0.01"`)) // float as string, quoted
+			})
+
+			It("should expand {replicas} placeholder to actual value", func() {
+				nodeConfig := map[string]string{
+					"total": "{replicas}",
+				}
+
+				result := buildNodeConfigString(nodeConfig, 8, "pool", federationv1.DeploymentModeStatefulSet, false)
+
+				Expect(result).To(Equal("total=8"))
+			})
+
+			It("should expand {pool} placeholder", func() {
+				nodeConfig := map[string]string{
+					"pool-name": "{pool}",
+				}
+
+				result := buildNodeConfigString(nodeConfig, 2, "gpu-workers", federationv1.DeploymentModeStatefulSet, false)
+
+				Expect(result).To(Equal(`pool-name="gpu-workers"`))
+			})
+
+			It("should handle mixed placeholders in single value", func() {
+				nodeConfig := map[string]string{
+					"name": "client_{pool}_{index}",
+				}
+
+				result := buildNodeConfigString(nodeConfig, 4, "default", federationv1.DeploymentModeStatefulSet, true)
+
+				Expect(result).To(Equal(`name=\"client_default_$FLOWER_INDEX\"`))
+			})
+
+			It("should produce deterministic output (sorted keys)", func() {
+				nodeConfig := map[string]string{
+					"zebra": "1",
+					"alpha": "2",
+					"mike":  "3",
+				}
+
+				result := buildNodeConfigString(nodeConfig, 1, "pool", federationv1.DeploymentModeStatefulSet, false)
+
+				// Keys should be sorted alphabetically
+				Expect(result).To(Equal("alpha=2 mike=3 zebra=1"))
+			})
+		})
+
+		Describe("nodeConfigNeedsDynamicExpansion", func() {
+			It("should return true for {index} placeholder", func() {
+				nodeConfig := map[string]string{"id": "{index}"}
+				Expect(nodeConfigNeedsDynamicExpansion(nodeConfig)).To(BeTrue())
+			})
+
+			It("should return true for {replicas} placeholder", func() {
+				nodeConfig := map[string]string{"total": "{replicas}"}
+				Expect(nodeConfigNeedsDynamicExpansion(nodeConfig)).To(BeTrue())
+			})
+
+			It("should return true for {node} placeholder", func() {
+				nodeConfig := map[string]string{"host": "{node}"}
+				Expect(nodeConfigNeedsDynamicExpansion(nodeConfig)).To(BeTrue())
+			})
+
+			It("should return false for {pool} placeholder only", func() {
+				nodeConfig := map[string]string{"pool": "{pool}"}
+				Expect(nodeConfigNeedsDynamicExpansion(nodeConfig)).To(BeFalse())
+			})
+
+			It("should return false for static values only", func() {
+				nodeConfig := map[string]string{
+					"dataset":    "cifar10",
+					"batch-size": "32",
+				}
+				Expect(nodeConfigNeedsDynamicExpansion(nodeConfig)).To(BeFalse())
+			})
+
+			It("should return true if any value has dynamic placeholder", func() {
+				nodeConfig := map[string]string{
+					"dataset": "cifar10",
+					"id":      "{index}",
+				}
+				Expect(nodeConfigNeedsDynamicExpansion(nodeConfig)).To(BeTrue())
+			})
+		})
+
+		Describe("validateNodeConfigForMode", func() {
+			It("should return nil for StatefulSet with {index}", func() {
+				nodeConfig := map[string]string{"id": "{index}"}
+				err := validateNodeConfigForMode(nodeConfig, federationv1.DeploymentModeStatefulSet, "pool")
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should return nil for StatefulSet with {replicas}", func() {
+				nodeConfig := map[string]string{"total": "{replicas}"}
+				err := validateNodeConfigForMode(nodeConfig, federationv1.DeploymentModeStatefulSet, "pool")
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should return error for DaemonSet with {index}", func() {
+				nodeConfig := map[string]string{"id": "{index}"}
+				err := validateNodeConfigForMode(nodeConfig, federationv1.DeploymentModeDaemonSet, "test-pool")
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("test-pool"))
+				Expect(err.Error()).To(ContainSubstring("{index}"))
+				Expect(err.Error()).To(ContainSubstring("DaemonSet"))
+			})
+
+			It("should return error for DaemonSet with {replicas}", func() {
+				nodeConfig := map[string]string{"total": "{replicas}"}
+				err := validateNodeConfigForMode(nodeConfig, federationv1.DeploymentModeDaemonSet, "test-pool")
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("{replicas}"))
+			})
+
+			It("should return nil for DaemonSet with {node}", func() {
+				nodeConfig := map[string]string{"host": "{node}"}
+				err := validateNodeConfigForMode(nodeConfig, federationv1.DeploymentModeDaemonSet, "pool")
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should return nil for DaemonSet with {pool}", func() {
+				nodeConfig := map[string]string{"pool-name": "{pool}"}
+				err := validateNodeConfigForMode(nodeConfig, federationv1.DeploymentModeDaemonSet, "pool")
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should return nil for empty nodeConfig", func() {
+				err := validateNodeConfigForMode(nil, federationv1.DeploymentModeDaemonSet, "pool")
+				Expect(err).NotTo(HaveOccurred())
+
+				err = validateNodeConfigForMode(map[string]string{}, federationv1.DeploymentModeDaemonSet, "pool")
+				Expect(err).NotTo(HaveOccurred())
 			})
 		})
 	})

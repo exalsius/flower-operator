@@ -632,11 +632,13 @@ spec:
           name: "client_{pool}_{index}"
 ```
 
-This generates pods with the following `--node-config` values:
-- Pod 0: `--node-config "name=client_default_0 num-partitions=4 partition-id=0"`
-- Pod 1: `--node-config "name=client_default_1 num-partitions=4 partition-id=1"`
-- Pod 2: `--node-config "name=client_default_2 num-partitions=4 partition-id=2"`
-- Pod 3: `--node-config "name=client_default_3 num-partitions=4 partition-id=3"`
+This generates pods with the following `--node-config` values (in TOML format):
+- Pod 0: `--node-config 'name="client_default_0" num-partitions=4 partition-id=0'`
+- Pod 1: `--node-config 'name="client_default_1" num-partitions=4 partition-id=1'`
+- Pod 2: `--node-config 'name="client_default_2" num-partitions=4 partition-id=2'`
+- Pod 3: `--node-config 'name="client_default_3" num-partitions=4 partition-id=3'`
+
+Note: String values are automatically quoted for TOML compatibility. Integer placeholders like `{index}` and `{replicas}` remain unquoted since they expand to integers.
 
 ### DaemonSet with Node Identification
 

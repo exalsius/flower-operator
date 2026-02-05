@@ -530,9 +530,10 @@ func (r *FederationReconciler) buildSuperNodeContainer(federation *federationv1.
 			replicas = *pool.Replicas
 		}
 
-		nodeConfigStr := buildNodeConfigString(pool.NodeConfig, replicas, pool.Name, federation.Spec.Mode)
+		needsShellExpansion := nodeConfigNeedsDynamicExpansion(pool.NodeConfig)
+		nodeConfigStr := buildNodeConfigString(pool.NodeConfig, replicas, pool.Name, federation.Spec.Mode, needsShellExpansion)
 
-		if nodeConfigNeedsDynamicExpansion(pool.NodeConfig) {
+		if needsShellExpansion {
 			// Use shell wrapper to extract index from POD_NAME and expand env vars
 			var shellScript string
 			if federation.Spec.Mode == federationv1.DeploymentModeStatefulSet {
@@ -1295,11 +1296,12 @@ func validateNodeConfigForMode(nodeConfig map[string]string, mode federationv1.D
 	return nil
 }
 
-// buildNodeConfigString builds the --node-config argument string.
+// buildNodeConfigString builds the --node-config argument string in TOML format.
 // For StatefulSet mode, {index} and {replicas} are converted to shell variable references.
 // For DaemonSet mode, only {pool} and {node} are supported.
 // The {pool} placeholder is expanded at build time, others at runtime.
-func buildNodeConfigString(nodeConfig map[string]string, replicas int32, poolName string, mode federationv1.DeploymentMode) string {
+// String values are quoted for TOML compatibility; integers and booleans are left unquoted.
+func buildNodeConfigString(nodeConfig map[string]string, replicas int32, poolName string, mode federationv1.DeploymentMode, needsShellExpansion bool) string {
 	// Collect and sort keys for deterministic output
 	keys := make([]string, 0, len(nodeConfig))
 	for k := range nodeConfig {
@@ -1309,7 +1311,11 @@ func buildNodeConfigString(nodeConfig map[string]string, replicas int32, poolNam
 
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
-		v := nodeConfig[k]
+		originalValue := nodeConfig[k]
+		v := originalValue
+
+		// Track if value is purely a numeric placeholder (will expand to integer at runtime)
+		isPureIntegerPlaceholder := (v == "{index}" || v == "{replicas}")
 
 		// Replace static placeholders at build time
 		v = strings.ReplaceAll(v, "{pool}", poolName)
@@ -1323,7 +1329,38 @@ func buildNodeConfigString(nodeConfig map[string]string, replicas int32, poolNam
 		// Convert {node} to env var reference for runtime expansion
 		v = strings.ReplaceAll(v, "{node}", "$FLOWER_NODE_NAME")
 
-		parts = append(parts, fmt.Sprintf("%s=%s", k, v))
+		// Format value for TOML: quote strings, leave integers/booleans unquoted
+		formattedValue := formatNodeConfigValue(v, needsShellExpansion, isPureIntegerPlaceholder)
+		parts = append(parts, fmt.Sprintf("%s=%s", k, formattedValue))
 	}
 	return strings.Join(parts, " ")
+}
+
+// formatNodeConfigValue formats a value for TOML node-config.
+// Integers and booleans are left unquoted; strings are quoted.
+// When needsShellExpansion is true, uses escaped quotes \" for shell compatibility.
+// isPureIntegerPlaceholder indicates the value was originally {index} or {replicas}.
+func formatNodeConfigValue(v string, needsShellExpansion bool, isPureIntegerPlaceholder bool) string {
+	// Pure integer placeholders like {index} expand to integers at runtime - don't quote
+	if isPureIntegerPlaceholder {
+		return v
+	}
+
+	// Check if value is a pure integer
+	if _, err := strconv.Atoi(v); err == nil {
+		return v
+	}
+
+	// Check if value is a boolean
+	if v == "true" || v == "false" {
+		return v
+	}
+
+	// Value is a string - needs quoting for TOML
+	if needsShellExpansion {
+		// Inside shell double quotes, use escaped quotes
+		return `\"` + v + `\"`
+	}
+	// Direct args, use regular quotes
+	return `"` + v + `"`
 }
